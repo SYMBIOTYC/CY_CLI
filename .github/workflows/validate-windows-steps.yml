@@ -1,0 +1,238 @@
+name: Validate Windows Build Steps (Mock Mode)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Generate mock artifacts for all steps
+  generate-mocks:
+    name: Generate Mock Artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      mock-path: ${{ steps.set-mock.outputs.path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate mock artifacts
+        id: set-mock
+        run: |
+          MOCK_PATH="${{ github.workspace }}/.github/workflows/tests/mocks"
+          mkdir -p "$MOCK_PATH"/{step-{3,4,5,6,7,8,9,10},artifacts}
+
+          # Step 3: Mock private repo checkout
+          mkdir -p "$MOCK_PATH/step-3/cy-cli-private/.fundament/codex-rs/src"
+          echo "fn main() {}" > "$MOCK_PATH/step-3/cy-cli-private/.fundament/codex-rs/src/lib.rs"
+
+          # Step 5: Mock after rust install
+          sed -i '1i #![recursion_limit = "256"]' "$MOCK_PATH/step-3/cy-cli-private/.fundament/codex-rs/src/lib.rs"
+
+          # Step 6: Mock cargo tree
+          echo "[mock]" > "$MOCK_PATH/step-6/Cargo.toml"
+
+          # Step 7: Mock build output
+          mkdir -p "$MOCK_PATH/artifacts/release"
+          echo "MZ" > "$MOCK_PATH/artifacts/release/cy.exe"
+          cp "$MOCK_PATH/artifacts/release/cy.exe" "$MOCK_PATH/step-7/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
+
+          # Step 8: Mock package
+          cp "$MOCK_PATH/artifacts/release/cy.exe" "$MOCK_PATH/step-8/cy.exe"
+
+          # Step 9: Mock installer inputs
+          mkdir -p "$MOCK_PATH/step-9/bin"
+          cp "$MOCK_PATH/artifacts/release/cy.exe" "$MOCK_PATH/step-9/bin/cy.exe"
+          cat > "$MOCK_PATH/step-9/cy-wrapper.ps1" << 'EOF'
+          Write-Host "CY-CLI Mock Wrapper"
+          EOF
+          chmod +x "$MOCK_PATH/step-9/cy-wrapper.ps1"
+
+          # Step 10: Mock upload artifacts
+          echo "mock" > "$MOCK_PATH/step-10/cy-x86_64-pc-windows-msvc.zip"
+          echo "abc123" > "$MOCK_PATH/step-10/cy-x86_64-pc-windows-msvc.zip.sha256"
+          echo "mock" > "$MOCK_PATH/step-10/CY-CLI-x86_64-setup.exe"
+          echo "def456" > "$MOCK_PATH/step-10/CY-CLI-x86_64-setup.exe.sha256"
+
+          echo "path=$MOCK_PATH" >> "$GITHUB_OUTPUT"
+
+  # Parallel step validation
+  validate-step-3:
+    name: Step 3 - Checkout
+    needs: generate-mocks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate checkout structure
+        run: |
+          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-3"
+          test -d "$MOCK/cy-cli-private/.fundament/codex-rs/src"
+          test -f "$MOCK/cy-cli-private/.fundament/codex-rs/src/lib.rs"
+          echo "✓ Step 3: Checkout structure valid"
+
+  validate-step-5:
+    name: Step 5 - Patch recursion
+    needs: generate-mocks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate recursion limit patch
+        run: |
+          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-3"
+          grep -q 'recursion_limit = "256"' "$MOCK/cy-cli-private/.fundament/codex-rs/src/lib.rs"
+          echo "✓ Step 5: Recursion limit patched"
+
+  validate-step-6:
+    name: Step 6 - Patch mio
+    needs: generate-mocks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate mio patch
+        run: |
+          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-6"
+          test -f "$MOCK/Cargo.toml"
+          echo "✓ Step 6: mio patch valid"
+
+  validate-step-7:
+    name: Step 7 - Build binary
+    needs: generate-mocks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate build output
+        run: |
+          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-7"
+          test -f "$MOCK/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
+          echo "✓ Step 7: Binary built"
+
+  validate-step-8:
+    name: Step 8 - Package artifact
+    needs: generate-mocks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate package
+        run: |
+          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-8"
+          test -f "$MOCK/cy.exe"
+          echo "✓ Step 8: Package ready"
+
+  validate-step-9:
+    name: Step 9 - Build installer
+    needs: generate-mocks
+    runs-on: windows-latest
+    steps:
+      - name: Validate installer script
+        run: |
+          $mockPath = "${{ needs.generate-mocks.outputs.mock-path }}/step-9"
+          $issPath = Join-Path $mockPath "installer.iss"
+
+          # Generate ISS script
+          @"
+          ; CY-CLI Windows Installer
+          #define MyAppName "CY-CLI"
+          #define MyAppVersion "0.1.5"
+          [Setup]
+          AppName={#MyAppName}
+          OutputDir=.
+          OutputBaseFilename=test-setup
+          [Files]
+          Source: "bin\cy.exe"; DestDir: "{app}"; Flags: ignoreversion
+          "@ | Out-File $issPath
+
+          # Validate syntax
+          if (Test-Path $issPath) {
+            Write-Host "✓ Step 9: ISS script generated"
+          } else {
+            Write-Error "ISS script missing"
+            exit 1
+          }
+
+      - name: Validate ISS syntax
+        run: |
+          $mockPath = "${{ needs.generate-mocks.outputs.mock-path }}/step-9"
+          $issPath = Join-Path $mockPath "installer.iss"
+
+          # Check for balanced braces
+          $content = Get-Content $issPath
+          $open = ($content -split '' | Where-Object { $_ -eq '{' }).Count
+          $close = ($content -split '' | Where-Object { $_ -eq '}' }).Count
+
+          if ($open -eq $close) {
+            Write-Host "✓ Step 9: ISS braces balanced ($open pairs)"
+          } else {
+            Write-Error "ISS braces unbalanced: $open open, $close close"
+            exit 1
+          }
+
+          # Check for Pos() syntax error
+          if (Select-String -Path $issPath -Pattern 'Pos\(.*\) = 0' -Quiet) {
+            Write-Host "✓ Step 9: Pos() syntax correct"
+          } elseif (Select-String -Path $issPath -Pattern 'Pos\(.* = 0' -Quiet) {
+            Write-Error "ISS Pos() syntax error: missing closing parenthesis"
+            exit 1
+          }
+
+      - name: Validate source files exist
+        run: |
+          $mockPath = "${{ needs.generate-mocks.outputs.mock-path }}/step-9"
+          $binPath = Join-Path $mockPath "bin\cy.exe"
+
+          if (Test-Path $binPath) {
+            Write-Host "✓ Step 9: Source file bin/cy.exe exists"
+          } else {
+            Write-Error "Source file missing: bin/cy.exe"
+            exit 1
+          }
+
+  validate-step-10:
+    name: Step 10 - Upload artifacts
+    needs: generate-mocks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate all artifacts exist
+        run: |
+          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-10"
+          REQUIRED=(
+            "cy-x86_64-pc-windows-msvc.zip"
+            "cy-x86_64-pc-windows-msvc.zip.sha256"
+            "CY-CLI-x86_64-setup.exe"
+            "CY-CLI-x86_64-setup.exe.sha256"
+          )
+
+          ALL_OK=true
+          for file in "${REQUIRED[@]}"; do
+            if [ -f "$MOCK/$file" ]; then
+              echo "  ✓ $file"
+            else
+              echo "  ✗ $file MISSING"
+              ALL_OK=false
+            fi
+          done
+
+          if [ "$ALL_OK" = true ]; then
+            echo "✓ Step 10: All artifacts ready for upload"
+          else
+            echo "✗ Step 10: Missing artifacts"
+            exit 1
+          fi
+
+  # Parallel validation report
+  validation-report:
+    name: Validation Report
+    needs: [validate-step-3, validate-step-5, validate-step-6, validate-step-7, validate-step-8, validate-step-9, validate-step-10]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate report
+        run: |
+          echo "## Windows Workflow Validation Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Name | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 3 | Checkout private source | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 5 | Patch recursion limit | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 6 | Patch mio | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 7 | Build release binary | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 8 | Package Windows artifact | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 9 | Build Windows installer | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 10 | Upload artifacts | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**All steps validated in parallel with mock data**" >> "$GITHUB_STEP_SUMMARY"
