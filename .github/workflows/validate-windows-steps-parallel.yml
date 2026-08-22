@@ -12,31 +12,27 @@ jobs:
     name: Step 6 - Patch mio
     runs-on: windows-2022
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          path: cy-cli-private
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-          cache: true
-
-      - name: Patch mio with mock project
-        working-directory: cy-cli-private/.fundament/codex-rs
+      - name: Setup mock project
         run: |
           $ErrorActionPreference = 'Stop'
           
-          # Create mock project structure
-          New-Item -ItemType Directory -Force -Path src | Out-Null
-          Set-Content -Path src/main.rs -Value 'fn main() {}'
-          Set-Content -Path Cargo.toml -Value @'
+          # Create mock project structure in workspace
+          $projectPath = "${{ github.workspace }}/cy-cli-private/.fundament/codex-rs"
+          New-Item -ItemType Directory -Force -Path "$projectPath/src" | Out-Null
+          Set-Content -Path "$projectPath/src/main.rs" -Value 'fn main() {}'
+          Set-Content -Path "$projectPath/Cargo.toml" -Value @'
           [package]
           name = "cy"
           version = "0.1.0"
           edition = "2021"
           '@
+          
+          Write-Host "✓ Mock project created at $projectPath"
+
+      - name: Patch mio with mock project
+        working-directory: ${{ github.workspace }}/cy-cli-private/.fundament/codex-rs
+        run: |
+          $ErrorActionPreference = 'Stop'
           
           # Run actual mio patch commands
           cargo update -p mio
@@ -48,31 +44,27 @@ jobs:
     name: Step 7 - Build binary
     runs-on: windows-2022
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          path: cy-cli-private
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-          cache: true
-
-      - name: Build release binary with mock
-        working-directory: cy-cli-private/.fundament/codex-rs
+      - name: Setup mock project
         run: |
           $ErrorActionPreference = 'Stop'
           
-          # Create mock project
-          New-Item -ItemType Directory -Force -Path src | Out-Null
-          Set-Content -Path src/main.rs -Value 'fn main() { println!("mock"); }'
-          Set-Content -Path Cargo.toml -Value @'
+          # Create mock project structure
+          $projectPath = "${{ github.workspace }}/cy-cli-private/.fundament/codex-rs"
+          New-Item -ItemType Directory -Force -Path "$projectPath/src" | Out-Null
+          Set-Content -Path "$projectPath/src/main.rs" -Value 'fn main() { println!("mock"); }'
+          Set-Content -Path "$projectPath/Cargo.toml" -Value @'
           [package]
           name = "cy"
           version = "0.1.0"
           edition = "2021"
           '@
+          
+          Write-Host "✓ Mock project created"
+
+      - name: Build release binary with mock
+        working-directory: ${{ github.workspace }}/cy-cli-private/.fundament/codex-rs
+        run: |
+          $ErrorActionPreference = 'Stop'
           
           # Build
           cargo build --bin cy --release --target x86_64-pc-windows-msvc
@@ -102,7 +94,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           
           # Create mock PE file
-          $bytes = [System.IO.File]::WriteAllBytes("${{ github.workspace }}/cy.exe", @(0x4D, 0x5A))
+          [System.IO.File]::WriteAllBytes("${{ github.workspace }}/cy.exe", @(0x4D, 0x5A))
           
           Write-Host "✓ Step 8: Mock binary created"
 
@@ -134,7 +126,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/bin" | Out-Null
           [System.IO.File]::WriteAllBytes("${{ github.workspace }}/bin/cy.exe", @(0x4D, 0x5A))
           
-          # Create mock wrapper
+          # Create mock tools directory and wrapper
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/tools" | Out-Null
           Set-Content -Path "${{ github.workspace }}/tools/cy-wrapper.ps1" -Value 'Write-Host "CY-CLI Mock Wrapper"'
           
           Write-Host "✓ Step 9: Mock inputs created"
