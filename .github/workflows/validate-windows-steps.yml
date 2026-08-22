@@ -37,6 +37,7 @@ jobs:
           # Step 7: Mock build output
           mkdir -p "$MOCK_PATH/artifacts/release"
           echo "MZ" > "$MOCK_PATH/artifacts/release/cy.exe"
+          mkdir -p "$MOCK_PATH/step-7/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release"
           cp "$MOCK_PATH/artifacts/release/cy.exe" "$MOCK_PATH/step-7/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
 
           # Step 8: Mock package
