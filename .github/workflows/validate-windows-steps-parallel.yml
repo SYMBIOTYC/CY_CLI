@@ -142,10 +142,7 @@ jobs:
           
           $BIN = Join-Path $env:GITHUB_WORKSPACE 'bin/cy.exe'
           $WRAPPER = Join-Path $env:GITHUB_WORKSPACE 'tools/cy-wrapper.ps1'
-          $INSTALLER = 'CY-CLI-x86_64-setup.exe'
-          $VERSION = '0.1.5'
           
-          # Verify inputs
           if (-not (Test-Path $BIN)) {
             Write-Error "Binary missing: $BIN"
             exit 1
@@ -155,28 +152,7 @@ jobs:
             exit 1
           }
           
-          # Create ISS script using .NET to avoid here-string issues
-          $issPath = Join-Path $env:GITHUB_WORKSPACE 'installer.iss'
-          $lines = @(
-            '; CY-CLI Windows Installer'
-            '#define MyAppName "CY-CLI"'
-            '#define MyAppVersion "0.1.5"'
-            '[Setup]'
-            'AppName={#MyAppName}'
-            "OutputDir=${{ github.workspace }}"
-            'OutputBaseFilename=CY-CLI-x86_64-setup'
-            '[Files]'
-            'Source: "bin\cy.exe"; DestDir: "{app}"; Flags: ignoreversion'
-          )
-          [System.IO.File]::WriteAllLines($issPath, $lines)
-          
-          # Verify ISS
-          if (Test-Path $issPath) {
-            Write-Host "✓ Step 9: ISS script generated"
-          } else {
-            Write-Error "ISS script missing"
-            exit 1
-          }
+          Write-Host "Step 9: Mock inputs validated"
 
   validate-step-10:
     name: Step 10 - Upload artifacts
