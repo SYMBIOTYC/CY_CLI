@@ -25,6 +25,9 @@ jobs:
           name = "cy"
           version = "0.1.0"
           edition = "2021"
+
+          [dependencies]
+          mio = "1"
           '@
           
           Write-Host "✓ Mock project created at $projectPath"
@@ -137,10 +140,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           
-          $BIN = "${{ github.workspace }}/bin/cy.exe"
-          $WRAPPER = "${{ github.workspace }}/tools/cy-wrapper.ps1"
-          $INSTALLER = "CY-CLI-x86_64-setup.exe"
-          $VERSION = "0.1.5"
+          $BIN = '${{ github.workspace }}/bin/cy.exe'
+          $WRAPPER = '${{ github.workspace }}/tools/cy-wrapper.ps1'
+          $INSTALLER = 'CY-CLI-x86_64-setup.exe'
+          $VERSION = '0.1.5'
           
           # Verify inputs
           if (-not (Test-Path $BIN)) {
@@ -153,17 +156,17 @@ jobs:
           }
           
           # Create ISS script
-          $iss = @"
+          $iss = @'
           ; CY-CLI Windows Installer
           #define MyAppName "CY-CLI"
-          #define MyAppVersion "$VERSION"
+          #define MyAppVersion "0.1.5"
           [Setup]
           AppName={#MyAppName}
           OutputDir=${{ github.workspace }}
           OutputBaseFilename=CY-CLI-x86_64-setup
           [Files]
           Source: "bin\cy.exe"; DestDir: "{app}"; Flags: ignoreversion
-          "@
+          '@
           $iss | Out-File "${{ github.workspace }}/installer.iss"
           
           # Verify ISS
