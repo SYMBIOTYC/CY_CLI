@@ -155,20 +155,20 @@ jobs:
             exit 1
           }
           
-          # Create ISS script
+          # Create ISS script using .NET to avoid here-string issues
           $issPath = Join-Path $env:GITHUB_WORKSPACE 'installer.iss'
-          $issContent = @'
-          ; CY-CLI Windows Installer
-          #define MyAppName "CY-CLI"
-          #define MyAppVersion "0.1.5"
-          [Setup]
-          AppName={#MyAppName}
-          OutputDir=${{ github.workspace }}
-          OutputBaseFilename=CY-CLI-x86_64-setup
-          [Files]
-          Source: "bin\cy.exe"; DestDir: "{app}"; Flags: ignoreversion
-          '@
-          [System.IO.File]::WriteAllText($issPath, $issContent)
+          $lines = @(
+            '; CY-CLI Windows Installer'
+            '#define MyAppName "CY-CLI"'
+            '#define MyAppVersion "0.1.5"'
+            '[Setup]'
+            'AppName={#MyAppName}'
+            "OutputDir=${{ github.workspace }}"
+            'OutputBaseFilename=CY-CLI-x86_64-setup'
+            '[Files]'
+            'Source: "bin\cy.exe"; DestDir: "{app}"; Flags: ignoreversion'
+          )
+          [System.IO.File]::WriteAllLines($issPath, $lines)
           
           # Verify ISS
           if (Test-Path $issPath) {
