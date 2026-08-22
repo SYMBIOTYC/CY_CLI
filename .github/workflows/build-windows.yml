@@ -66,25 +66,23 @@ jobs:
           powershell -Command "Get-FileHash -Algorithm SHA256 cy-x86_64-pc-windows-msvc.zip | Select-Object -ExpandProperty Hash | Out-File -FilePath cy-x86_64-pc-windows-msvc.zip.sha256"
 
       - name: Build Windows .exe installer
-        shell: bash
+        shell: powershell
         run: |
-          BIN="cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
-          WRAPPER="${{ github.workspace }}/tools/cy-wrapper.ps1"
-          INSTALLER="CY-CLI-x86_64-setup.exe"
-          VERSION="${{ github.event.inputs.tag }}"
-          VERSION="${VERSION#v}"
+          $ErrorActionPreference = 'Stop'
+          $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
+          $WRAPPER = "${{ github.workspace }}/tools/cy-wrapper.ps1"
+          $INSTALLER = "CY-CLI-x86_64-setup.exe"
+          $VERSION = "${{ github.event.inputs.tag }}".TrimStart('v')
 
-          mkdir -p "${{ github.workspace }}/bin"
-          cp "$BIN" "${{ github.workspace }}/bin/cy.exe"
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/bin" | Out-Null
+          Copy-Item $BIN "${{ github.workspace }}/bin/cy.exe"
 
-          curl -fsSL -o is.exe https://github.com/jrsoftware/issrc/releases/download/is-6_2_2/innosetup-6.2.2.exe
-          mkdir -p "C:\\Program Files (x86)\\Inno Setup"
-          ./is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="C:\\Program Files (x86)\\Inno Setup"
+          choco install innosetup -y --no-progress
 
-          echo "CY-CLI is licensed under the Apache License 2.0." > license.txt
-          echo "See https://github.com/SYMBIOTYC/CY-CLI-releases/blob/main/LICENSE" >> license.txt
+          "CY-CLI is licensed under the Apache License 2.0." | Out-File license.txt
+          "See https://github.com/SYMBIOTYC/CY-CLI-releases/blob/main/LICENSE" | Out-File -Append license.txt
 
-          cat > installer.iss << ISSEOF
+          @"
           ; CY-CLI Windows Installer
           #define MyAppName "CY-CLI"
           #define MyAppVersion "$VERSION"
@@ -141,15 +139,20 @@ jobs:
             Result := False;
             if not RegQueryStringValue(HKCU, 'Environment', 'Path', OldPath) then
               Exit;
-            Result := Pos(UpperCase(Path), Uppercase(OldPath) = 0;
+            Result := Pos(UpperCase(Path), Uppercase(OldPath)) = 0;
           end;
-          ISSEOF
+          "@ | Out-File installer.iss
 
-          "C:\Program Files (x86)\Inno Setup\ISCC.exe" installer.iss
+          $iscc = Join-Path $env:ProgramFiles(x86) 'Inno Setup\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            $iscc = Join-Path $env:ProgramFiles 'Inno Setup\ISCC.exe'
+          }
+          & $iscc installer.iss
 
-          echo "Created $INSTALLER"
-          ls -lh "$INSTALLER"
-          powershell -Command "Get-FileHash -Algorithm SHA256 $INSTALLER | Select-Object -ExpandProperty Hash | Out-File -FilePath $INSTALLER.sha256"
+          Write-Host "Created $INSTALLER"
+          Get-ChildItem $INSTALLER | Select-Object FullName, Length
+          Get-FileHash -Algorithm SHA256 $INSTALLER | Select-Object -ExpandProperty Hash | Out-File -FilePath "$INSTALLER.sha256"
+        timeout-minutes: 30
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
