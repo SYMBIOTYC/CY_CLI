@@ -140,8 +140,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           
-          $BIN = '${{ github.workspace }}/bin/cy.exe'
-          $WRAPPER = '${{ github.workspace }}/tools/cy-wrapper.ps1'
+          $BIN = Join-Path $env:GITHUB_WORKSPACE 'bin/cy.exe'
+          $WRAPPER = Join-Path $env:GITHUB_WORKSPACE 'tools/cy-wrapper.ps1'
           $INSTALLER = 'CY-CLI-x86_64-setup.exe'
           $VERSION = '0.1.5'
           
@@ -156,7 +156,8 @@ jobs:
           }
           
           # Create ISS script
-          $iss = @'
+          $issPath = Join-Path $env:GITHUB_WORKSPACE 'installer.iss'
+          $issContent = @'
           ; CY-CLI Windows Installer
           #define MyAppName "CY-CLI"
           #define MyAppVersion "0.1.5"
@@ -167,10 +168,10 @@ jobs:
           [Files]
           Source: "bin\cy.exe"; DestDir: "{app}"; Flags: ignoreversion
           '@
-          $iss | Out-File "${{ github.workspace }}/installer.iss"
+          [System.IO.File]::WriteAllText($issPath, $issContent)
           
           # Verify ISS
-          if (Test-Path "${{ github.workspace }}/installer.iss") {
+          if (Test-Path $issPath) {
             Write-Host "✓ Step 9: ISS script generated"
           } else {
             Write-Error "ISS script missing"
