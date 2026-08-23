@@ -25,9 +25,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           # Stand in for the Rust release binary: a real PE file ISCC can embed.
-          $binDir = "${{ github.workspace }}/bin"
-          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-          $mockBin = Join-Path $binDir 'cy.exe'
+          $mockDir = "${{ github.workspace }}/mock-artifact"
+          New-Item -ItemType Directory -Force -Path $mockDir | Out-Null
+          $mockBin = Join-Path $mockDir 'cy.exe'
           $pe = [byte[]](0x4D,0x5A) + [System.Text.Encoding]::ASCII.GetBytes(([string]::Join('', (1..4096 | ForEach-Object { 'x' }))))
           [System.IO.File]::WriteAllBytes($mockBin, $pe)
 
