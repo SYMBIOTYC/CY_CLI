@@ -19,6 +19,11 @@ jobs:
   build:
     name: Build macOS ${{ matrix.target }}
     runs-on: blacksmith-6vcpu-macos-15
+    env:
+      # Pin the artifact's minimum macOS to the value declared in Info.plist below,
+      # so the host image (previously macos-14, now macos-15) can't silently shift
+      # the compatibility floor of the binaries we ship.
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     strategy:
       fail-fast: false
       matrix:
