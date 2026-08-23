@@ -33,11 +33,23 @@ jobs:
         with:
           path: release-repo
 
+      # `sed -i '1i ...'` prepends unconditionally, so running this twice gives the
+      # crate two `#![recursion_limit]` attributes. rustc currently downgrades that
+      # to `warning: unused attribute` while warning it "will become a hard error in
+      # a future release", so keep the patch idempotent rather than relying on it
+      # being applied exactly once.
       - name: Patch recursion limit for Windows
         shell: bash
         run: |
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/exec/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/tui/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
+          find cy-cli-private/.fundament/codex-rs -name lib.rs \( -path "*/exec/*" -o -path "*/tui/*" \) -print0 |
+          while IFS= read -r -d '' f; do
+            if grep -qF '#![recursion_limit = "256"]' "$f"; then
+              echo "already patched: $f"
+            else
+              sed -i '1i #![recursion_limit = "256"]' "$f"
+              echo "patched: $f"
+            fi
+          done
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -50,12 +62,6 @@ jobs:
         run: |
           cargo update -p mio
           cargo tree -p mio
-
-      - name: Patch recursion limit for Windows
-        shell: bash
-        run: |
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/exec/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/tui/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
 
       - name: Build release binary
         working-directory: cy-cli-private/.fundament/codex-rs
