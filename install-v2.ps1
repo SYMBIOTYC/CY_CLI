@@ -1,9 +1,9 @@
 # CY-CLI Windows Installer v2 (Self-Updating)
-# Repo: https://github.com/SYMBIOTYC/CY-CLI
+# Repo: https://github.com/SYMBIOTYC/CY-CLI-releases
 
 param(
     [string]$InstallDir = "$env:USERPROFILE\.local\bin",
-    [string]$Repo = "SYMBIOTYC/CY-CLI",
+    [string]$Repo = "SYMBIOTYC/CY-CLI-releases",
     [string]$StoreDir = "$env:USERPROFILE\.local\share\cy"
 )
 
@@ -68,7 +68,7 @@ $wrapperContent = @'
 # CY-CLI Self-Updating Wrapper (embedded)
 param()
 $ErrorActionPreference = "Stop"
-$CY_REPO = $env:CY_REPO -ne $null ? $env:CY_REPO : "SYMBIOTYC/CY-CLI"
+$CY_REPO = $env:CY_REPO -ne $null ? $env:CY_REPO : "SYMBIOTYC/CY-CLI-releases"
 $CY_INSTALL_DIR = $env:CY_INSTALL_DIR -ne $null ? $env:CY_INSTALL_DIR : "$env:USERPROFILE\.local\share\cy"
 $CY_VERSION_FILE = Join-Path $CY_INSTALL_DIR "VERSION"
 $CY_BIN_DIR = Join-Path $CY_INSTALL_DIR "bin"
