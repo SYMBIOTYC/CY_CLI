@@ -14,9 +14,23 @@ $BinDir    = Join-Path $OutDir 'bin'
 $LicenseTxt = Join-Path $OutDir 'license.txt'
 $IssPath   = Join-Path $OutDir 'installer.iss'
 
+# Copy-Item fails outright with "Cannot overwrite the item ... with itself" when the
+# source resolves to the destination, which is what happens whenever a caller passes a
+# -BinPath that already sits in $OutDir\bin. Staging an input that is already staged
+# should be a no-op, not a hard error.
+function Copy-IfDistinct {
+    param([string]$From, [string]$To)
+
+    $src = (Resolve-Path -LiteralPath $From).ProviderPath
+    $dst = if (Test-Path -LiteralPath $To) { (Resolve-Path -LiteralPath $To).ProviderPath } else { $To }
+    if ($src -ne $dst) {
+        Copy-Item -LiteralPath $src -Destination $To -Force
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-Copy-Item $BinPath (Join-Path $BinDir 'cy.exe') -Force
-Copy-Item $WrapperPath (Join-Path $OutDir 'cy-wrapper.ps1') -Force
+Copy-IfDistinct -From $BinPath -To (Join-Path $BinDir 'cy.exe')
+Copy-IfDistinct -From $WrapperPath -To (Join-Path $OutDir 'cy-wrapper.ps1')
 
 @"
 CY-CLI is licensed under the Apache License 2.0.
