@@ -70,10 +70,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
-          $WRAPPER = "${{ github.workspace }}/tools/cy-wrapper.ps1"
+          $WRAPPER = "${{ github.workspace }}\tools\cy-wrapper.ps1"
           $VERSION = "${{ github.event.inputs.tag }}".TrimStart('v')
 
-          & "${{ github.workspace }}/tools/build-installer.ps1" `
+          & "${{ github.workspace }}\tools\build-installer.ps1" `
             -BinPath $BIN `
             -WrapperPath $WRAPPER `
             -Version $VERSION `
