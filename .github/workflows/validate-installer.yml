@@ -43,3 +43,31 @@ jobs:
             exit 1
           }
           Write-Host "OK: installer step passed"
+
+      # Regression cover for the "Cannot overwrite the item ... with itself" abort:
+      # a -BinPath that already sits in <OutDir>\bin used to kill the whole build.
+      - name: Build installer from an already-staged binary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $outDir = "${{ github.workspace }}/staged"
+          $binDir = Join-Path $outDir 'bin'
+          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+
+          $stagedBin = Join-Path $binDir 'cy.exe'
+          $pe = [byte[]](0x4D,0x5A) + [System.Text.Encoding]::ASCII.GetBytes(([string]::Join('', (1..4096 | ForEach-Object { 'x' }))))
+          [System.IO.File]::WriteAllBytes($stagedBin, $pe)
+
+          & "${{ github.workspace }}/release-repo/tools/build-installer.ps1" `
+            -BinPath $stagedBin `
+            -WrapperPath "${{ github.workspace }}/release-repo/tools/cy-wrapper.ps1" `
+            -Version "${{ github.event.inputs.version }}" `
+            -OutDir $outDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          if (-not (Test-Path (Join-Path $outDir 'CY-CLI-x86_64-setup.exe'))) {
+            Write-Error "Installer executable was not produced from a pre-staged binary"
+            exit 1
+          }
+          Write-Host "OK: pre-staged binary path passed"
