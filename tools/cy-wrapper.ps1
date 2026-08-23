@@ -5,8 +5,8 @@ param()
 
 $ErrorActionPreference = "Stop"
 
-$CY_REPO = $env:CY_REPO -ne $null ? $env:CY_REPO : "SYMBIOTYC/CY-CLI"
-$CY_INSTALL_DIR = $env:CY_INSTALL_DIR -ne $null ? $env:CY_INSTALL_DIR : "$env:USERPROFILE\.local\share\cy"
+$CY_REPO = if ($env:CY_REPO) { $env:CY_REPO } else { "SYMBIOTYC/CY-CLI" }
+$CY_INSTALL_DIR = if ($env:CY_INSTALL_DIR) { $env:CY_INSTALL_DIR } else { "$env:USERPROFILE\.local\share\cy" }
 $CY_VERSION_FILE = Join-Path $CY_INSTALL_DIR "VERSION"
 $CY_BIN_DIR = Join-Path $CY_INSTALL_DIR "bin"
 
@@ -64,7 +64,7 @@ function Update-IfNeeded {
         $cleanTag = $latestTag.TrimStart('v')
         
         if ($localVersion -ne $cleanTag) {
-            Write-Host "[cy-wrapper] Update available: ${localVersion:-none} -> ${latestTag}" -ForegroundColor Yellow
+            Write-Host "[cy-wrapper] Update available: ${localVersion} -> ${latestTag}" -ForegroundColor Yellow
             $assetName = "cy-x86_64-pc-windows-msvc.zip"
             if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
                 $assetName = "cy-aarch64-pc-windows-msvc.zip"

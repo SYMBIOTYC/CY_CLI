@@ -27,6 +27,10 @@ jobs:
           ref: ${{ github.event.inputs.tag }}
           token: ${{ secrets.PAT_FOR_PRIVATE_REPO }}
           path: cy-cli-private
+      - name: Checkout release repo assets
+        uses: actions/checkout@v4
+        with:
+          path: release-repo
 
       - name: Patch recursion limit for Windows
         shell: bash
@@ -70,14 +74,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
-          $WRAPPER = "${{ github.workspace }}/tools/cy-wrapper.ps1"
+          $WRAPPER = "${{ github.workspace }}/release-repo/tools/cy-wrapper.ps1"
           $INSTALLER = "CY-CLI-x86_64-setup.exe"
           $VERSION = "${{ github.event.inputs.tag }}".TrimStart('v')
 
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/bin" | Out-Null
           Copy-Item $BIN "${{ github.workspace }}/bin/cy.exe"
 
-          choco install innosetup -y --no-progress
 
           "CY-CLI is licensed under the Apache License 2.0." | Out-File license.txt
           "See https://github.com/SYMBIOTYC/CY-CLI-releases/blob/main/LICENSE" | Out-File -Append license.txt
@@ -115,6 +118,10 @@ jobs:
           Name: "english"; MessagesFile: "compiler:Default.isl"
           Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
+          [Tasks]
+          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+          Name: "addtopath"; Description: "Add {#MyAppName} to your PATH"; GroupDescription: "Additional options:"
+
           [Files]
           Source: "bin\cy.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
           Source: "cy-wrapper.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -143,10 +150,29 @@ jobs:
           end;
           "@ | Out-File installer.iss
 
-          $iscc = Join-Path $env:ProgramFiles(x86) 'Inno Setup\ISCC.exe'
-          if (-not (Test-Path $iscc)) {
-            $iscc = Join-Path $env:ProgramFiles 'Inno Setup\ISCC.exe'
+          Copy-Item $WRAPPER "${{ github.workspace }}\cy-wrapper.ps1" -Force
+
+          $isccCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path ${env:ProgramFiles} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup\ISCC.exe'),
+            (Join-Path ${env:ProgramFiles} 'Inno Setup\ISCC.exe')
+          )
+          $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            $shim = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($shim) { $iscc = $shim.Source }
           }
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress | Out-Host
+            $shim = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($shim) { $iscc = $shim.Source }
+          }
+          if (-not $iscc) {
+            Write-Error "Inno Setup compiler (ISCC.exe) was not found on this runner"
+            exit 1
+          }
+          Write-Host "Using Inno Setup compiler: $iscc"
           & $iscc installer.iss
 
           Write-Host "Created $INSTALLER"
