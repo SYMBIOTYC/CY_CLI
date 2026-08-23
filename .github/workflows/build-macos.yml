@@ -1,6 +1,8 @@
 name: Build macOS
 
 on:
+  repository_dispatch:
+    types: [release-build]
   workflow_dispatch:
     inputs:
       private_repo:
