@@ -27,10 +27,6 @@ jobs:
           ref: ${{ github.event.inputs.tag }}
           token: ${{ secrets.PAT_FOR_PRIVATE_REPO }}
           path: cy-cli-private
-      - name: Checkout release repo assets
-        uses: actions/checkout@v4
-        with:
-          path: release-repo
 
       - name: Patch recursion limit for Windows
         shell: bash
@@ -73,10 +69,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
+          $WRAPPER = "${{ github.workspace }}/tools/cy-wrapper.ps1"
           $VERSION = "${{ github.event.inputs.tag }}".TrimStart('v')
-          & "${{ github.workspace }}/release-repo/tools/build-installer.ps1" `
-            -BinPath "${{ github.workspace }}/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe" `
-            -WrapperPath "${{ github.workspace }}/release-repo/tools/cy-wrapper.ps1" `
+
+          & "${{ github.workspace }}/tools/build-installer.ps1" `
+            -BinPath $BIN `
+            -WrapperPath $WRAPPER `
             -Version $VERSION `
             -OutDir "${{ github.workspace }}"
         timeout-minutes: 30
