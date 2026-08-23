@@ -12,8 +12,6 @@ jobs:
   generate-mocks:
     name: Generate Mock Artifacts
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    outputs:
-      mock-path: ${{ steps.set-mock.outputs.path }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -57,7 +55,17 @@ jobs:
           echo "mock" > "$MOCK_PATH/step-10/CY-CLI-x86_64-setup.exe"
           echo "def456" > "$MOCK_PATH/step-10/CY-CLI-x86_64-setup.exe.sha256"
 
-          echo "path=$MOCK_PATH" >> "$GITHUB_OUTPUT"
+      # Each validate-* job runs on its own ephemeral runner, so the mock tree has
+      # to travel as an artifact. Passing the generator's local path as a job output
+      # only moves a string, and every consumer then looks at a path that is not
+      # there.
+      - name: Upload mock artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-artifacts
+          path: .github/workflows/tests/mocks
+          include-hidden-files: true
+          retention-days: 1
 
   # Parallel step validation
   validate-step-3:
@@ -65,9 +73,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate checkout structure
         run: |
-          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-3"
+          MOCK="mocks/step-3"
           test -d "$MOCK/cy-cli-private/.fundament/codex-rs/src"
           test -f "$MOCK/cy-cli-private/.fundament/codex-rs/src/lib.rs"
           echo "✓ Step 3: Checkout structure valid"
@@ -77,9 +91,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate recursion limit patch
         run: |
-          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-3"
+          MOCK="mocks/step-3"
           grep -q 'recursion_limit = "256"' "$MOCK/cy-cli-private/.fundament/codex-rs/src/lib.rs"
           echo "✓ Step 5: Recursion limit patched"
 
@@ -88,9 +108,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate mio patch
         run: |
-          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-6"
+          MOCK="mocks/step-6"
           test -f "$MOCK/Cargo.toml"
           echo "✓ Step 6: mio patch valid"
 
@@ -99,9 +125,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate build output
         run: |
-          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-7"
+          MOCK="mocks/step-7"
           test -f "$MOCK/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
           echo "✓ Step 7: Binary built"
 
@@ -110,9 +142,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate package
         run: |
-          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-8"
+          MOCK="mocks/step-8"
           test -f "$MOCK/cy.exe"
           echo "✓ Step 8: Package ready"
 
@@ -121,9 +159,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-windows-2025
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate installer script
         run: |
-          $mockPath = "${{ needs.generate-mocks.outputs.mock-path }}/step-9"
+          $mockPath = Join-Path $env:GITHUB_WORKSPACE 'mocks/step-9'
           $issPath = Join-Path $mockPath "installer.iss"
 
           # Generate ISS script
@@ -149,7 +193,7 @@ jobs:
 
       - name: Validate ISS syntax
         run: |
-          $mockPath = "${{ needs.generate-mocks.outputs.mock-path }}/step-9"
+          $mockPath = Join-Path $env:GITHUB_WORKSPACE 'mocks/step-9'
           $issPath = Join-Path $mockPath "installer.iss"
 
           # Check for balanced braces
@@ -174,7 +218,7 @@ jobs:
 
       - name: Validate source files exist
         run: |
-          $mockPath = "${{ needs.generate-mocks.outputs.mock-path }}/step-9"
+          $mockPath = Join-Path $env:GITHUB_WORKSPACE 'mocks/step-9'
           $binPath = Join-Path $mockPath "bin\cy.exe"
 
           if (Test-Path $binPath) {
@@ -189,9 +233,15 @@ jobs:
     needs: generate-mocks
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Download mock artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mock-artifacts
+          path: mocks
+
       - name: Validate all artifacts exist
         run: |
-          MOCK="${{ needs.generate-mocks.outputs.mock-path }}/step-10"
+          MOCK="mocks/step-10"
           REQUIRED=(
             "cy-x86_64-pc-windows-msvc.zip"
             "cy-x86_64-pc-windows-msvc.zip.sha256"
