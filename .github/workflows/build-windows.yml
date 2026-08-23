@@ -73,111 +73,12 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
-          $WRAPPER = "${{ github.workspace }}/release-repo/tools/cy-wrapper.ps1"
-          $INSTALLER = "CY-CLI-x86_64-setup.exe"
           $VERSION = "${{ github.event.inputs.tag }}".TrimStart('v')
-
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/bin" | Out-Null
-          Copy-Item $BIN "${{ github.workspace }}/bin/cy.exe"
-
-
-          "CY-CLI is licensed under the Apache License 2.0." | Out-File license.txt
-          "See https://github.com/SYMBIOTYC/CY-CLI-releases/blob/main/LICENSE" | Out-File -Append license.txt
-
-          @"
-          ; CY-CLI Windows Installer
-          #define MyAppName "CY-CLI"
-          #define MyAppVersion "$VERSION"
-          #define MyAppPublisher "SYMBIOTYC"
-          #define MyAppURL "https://github.com/SYMBIOTYC/CY-CLI-releases"
-          #define MyAppExeName "cy-wrapper.ps1"
-
-          [Setup]
-          AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
-          AppName={#MyAppName}
-          AppVersion={#MyAppVersion}
-          AppVerName={#MyAppName} {#MyAppVersion}
-          AppPublisher={#MyAppPublisher}
-          AppPublisherURL={#MyAppURL}
-          AppSupportURL={#MyAppURL}
-          AppUpdatesURL={#MyAppURL}
-          DefaultDirName={localappdata}\Programs\{#MyAppName}
-          DefaultGroupName={#MyAppName}
-          DisableProgramGroupPage=yes
-          LicenseFile=license.txt
-          OutputDir=.
-          OutputBaseFilename=CY-CLI-x86_64-setup
-          Compression=lzma2
-          SolidCompression=yes
-          WizardStyle=modern
-          ArchitecturesInstallIn64BitMode=x64
-          ArchitecturesAllowed=x64
-
-          [Languages]
-          Name: "english"; MessagesFile: "compiler:Default.isl"
-          Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
-
-          [Tasks]
-          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-          Name: "addtopath"; Description: "Add {#MyAppName} to your PATH"; GroupDescription: "Additional options:"
-
-          [Files]
-          Source: "bin\cy.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-          Source: "cy-wrapper.ps1"; DestDir: "{app}"; Flags: ignoreversion
-
-          [Icons]
-          Name: "{group}\{#MyAppName}"; Filename: "{app}\cy-wrapper.ps1"
-          Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-          Name: "{autostartup}\{#MyAppName}"; Filename: "{app}\cy-wrapper.ps1"; Comment: "CY-CLI Self-Updating Wrapper"
-          Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\cy-wrapper.ps1"; Tasks: desktopicon
-
-          [Run]
-          Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\cy-wrapper.ps1"" --version"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
-
-          [Registry]
-          Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Flags: preservestringtype; Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
-
-          [Code]
-          function NeedsAddPath(Path: string): Boolean;
-          var
-            OldPath: string;
-          begin
-            Result := False;
-            if not RegQueryStringValue(HKCU, 'Environment', 'Path', OldPath) then
-              Exit;
-            Result := Pos(UpperCase(Path), Uppercase(OldPath)) = 0;
-          end;
-          "@ | Out-File installer.iss
-
-          Copy-Item $WRAPPER "${{ github.workspace }}\cy-wrapper.ps1" -Force
-
-          $isccCandidates = @(
-            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
-            (Join-Path ${env:ProgramFiles} 'Inno Setup 6\ISCC.exe'),
-            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup\ISCC.exe'),
-            (Join-Path ${env:ProgramFiles} 'Inno Setup\ISCC.exe')
-          )
-          $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $iscc) {
-            $shim = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            if ($shim) { $iscc = $shim.Source }
-          }
-          if (-not $iscc) {
-            choco install innosetup -y --no-progress | Out-Host
-            $shim = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            if ($shim) { $iscc = $shim.Source }
-          }
-          if (-not $iscc) {
-            Write-Error "Inno Setup compiler (ISCC.exe) was not found on this runner"
-            exit 1
-          }
-          Write-Host "Using Inno Setup compiler: $iscc"
-          & $iscc installer.iss
-
-          Write-Host "Created $INSTALLER"
-          Get-ChildItem $INSTALLER | Select-Object FullName, Length
-          Get-FileHash -Algorithm SHA256 $INSTALLER | Select-Object -ExpandProperty Hash | Out-File -FilePath "$INSTALLER.sha256"
+          & "${{ github.workspace }}/release-repo/tools/build-installer.ps1" `
+            -BinPath "${{ github.workspace }}/cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe" `
+            -WrapperPath "${{ github.workspace }}/release-repo/tools/cy-wrapper.ps1" `
+            -Version $VERSION `
+            -OutDir "${{ github.workspace }}"
         timeout-minutes: 30
 
       - name: Upload artifacts

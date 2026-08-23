@@ -1,0 +1,45 @@
+name: Validate Windows Installer Step
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to bake into the installer'
+        required: false
+        default: '0.1.5'
+
+jobs:
+  installer:
+    name: Build Windows .exe installer
+    runs-on: windows-2022
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: release-repo
+
+      # No Rust build here — the test starts at the installer step with a mock cy.exe
+      - name: Build Windows .exe installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Stand in for the Rust release binary: a real PE file ISCC can embed.
+          $binDir = "${{ github.workspace }}/bin"
+          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+          $mockBin = Join-Path $binDir 'cy.exe'
+          $pe = [byte[]](0x4D,0x5A) + [System.Text.Encoding]::ASCII.GetBytes(([string]::Join('', (1..4096 | ForEach-Object { 'x' }))))
+          [System.IO.File]::WriteAllBytes($mockBin, $pe)
+
+          $installer = & "${{ github.workspace }}/release-repo/tools/build-installer.ps1" `
+            -BinPath $mockBin `
+            -WrapperPath "${{ github.workspace }}/release-repo/tools/cy-wrapper.ps1" `
+            -Version "${{ github.event.inputs.version }}" `
+            -OutDir "${{ github.workspace }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          if (-not (Test-Path "${{ github.workspace }}/CY-CLI-x86_64-setup.exe")) {
+            Write-Error "Installer executable was not produced"
+            exit 1
+          }
+          Write-Host "OK: installer step passed"
