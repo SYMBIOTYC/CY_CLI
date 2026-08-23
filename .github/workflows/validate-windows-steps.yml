@@ -11,7 +11,7 @@ jobs:
   # Generate mock artifacts for all steps
   generate-mocks:
     name: Generate Mock Artifacts
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       mock-path: ${{ steps.set-mock.outputs.path }}
     steps:
@@ -63,7 +63,7 @@ jobs:
   validate-step-3:
     name: Step 3 - Checkout
     needs: generate-mocks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Validate checkout structure
         run: |
@@ -75,7 +75,7 @@ jobs:
   validate-step-5:
     name: Step 5 - Patch recursion
     needs: generate-mocks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Validate recursion limit patch
         run: |
@@ -86,7 +86,7 @@ jobs:
   validate-step-6:
     name: Step 6 - Patch mio
     needs: generate-mocks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Validate mio patch
         run: |
@@ -97,7 +97,7 @@ jobs:
   validate-step-7:
     name: Step 7 - Build binary
     needs: generate-mocks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Validate build output
         run: |
@@ -108,7 +108,7 @@ jobs:
   validate-step-8:
     name: Step 8 - Package artifact
     needs: generate-mocks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Validate package
         run: |
@@ -119,7 +119,7 @@ jobs:
   validate-step-9:
     name: Step 9 - Build installer
     needs: generate-mocks
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Validate installer script
         run: |
@@ -187,7 +187,7 @@ jobs:
   validate-step-10:
     name: Step 10 - Upload artifacts
     needs: generate-mocks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Validate all artifacts exist
         run: |
@@ -220,7 +220,7 @@ jobs:
   validation-report:
     name: Validation Report
     needs: [validate-step-3, validate-step-5, validate-step-6, validate-step-7, validate-step-8, validate-step-9, validate-step-10]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Generate report
         run: |

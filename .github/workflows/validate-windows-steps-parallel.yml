@@ -10,7 +10,7 @@ on:
 jobs:
   validate-step-6:
     name: Step 6 - Patch mio
-    runs-on: windows-2022
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Setup mock project
         run: |
@@ -45,7 +45,7 @@ jobs:
 
   validate-step-7:
     name: Step 7 - Build binary
-    runs-on: windows-2022
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Setup mock project
         run: |
@@ -90,7 +90,7 @@ jobs:
 
   validate-step-8:
     name: Step 8 - Package artifact
-    runs-on: windows-2022
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Create mock binary
         run: |
@@ -119,7 +119,7 @@ jobs:
 
   validate-step-9:
     name: Step 9 - Build installer
-    runs-on: windows-2022
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Create mock inputs
         run: |
@@ -156,7 +156,7 @@ jobs:
 
   validate-step-10:
     name: Step 10 - Upload artifacts
-    runs-on: windows-2022
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - name: Create mock artifacts
         run: |
@@ -202,7 +202,7 @@ jobs:
   validation-report:
     name: Validation Report
     needs: [validate-step-6, validate-step-7, validate-step-8, validate-step-9, validate-step-10]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Generate report
         run: |
