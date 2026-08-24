@@ -97,3 +97,14 @@ jobs:
             CY-CLI-x86_64-setup.exe
             CY-CLI-x86_64-setup.exe.sha256
           retention-days: 90
+
+      - name: Upload to GitHub Release
+        if: always()
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+        run: |
+          for i in {1..12}; do
+            gh release upload "$TAG" cy-x86_64-pc-windows-msvc.zip cy-x86_64-pc-windows-msvc.zip.sha256 CY-CLI-x86_64-setup.exe CY-CLI-x86_64-setup.exe.sha256 && break
+            echo "Release not ready yet, retrying in 10s..."
+            sleep 10
+          done

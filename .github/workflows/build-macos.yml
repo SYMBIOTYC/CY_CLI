@@ -121,3 +121,14 @@ jobs:
           name: ${{ matrix.target }}-dmg
           path: ${{ matrix.artifact }}
           retention-days: 90
+
+      - name: Upload to GitHub Release
+        if: always()
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+        run: |
+          for i in {1..12}; do
+            gh release upload "$TAG" ${{ matrix.artifact }} && break
+            echo "Release not ready yet, retrying in 10s..."
+            sleep 10
+          done
