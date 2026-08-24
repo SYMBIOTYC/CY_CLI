@@ -102,6 +102,7 @@ jobs:
         if: always()
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
         run: |
           for i in {1..12}; do
