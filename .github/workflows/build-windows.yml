@@ -25,8 +25,8 @@ jobs:
       - name: Checkout private source code
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.inputs.private_repo }}
-          ref: ${{ github.event.inputs.tag }}
+          repository: ${{ github.event.inputs.private_repo || github.event.client_payload.private_repo }}
+          ref: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
           token: ${{ secrets.PAT_FOR_PRIVATE_REPO }}
           path: cy-cli-private
 
@@ -78,7 +78,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
           $WRAPPER = "${{ github.workspace }}\release-repo\tools\cy-wrapper.ps1"
-          $VERSION = "${{ github.event.inputs.tag }}".TrimStart('v')
+          $VERSION = "${{ github.event.inputs.tag || github.event.client_payload.tag }}".TrimStart('v')
 
           & "${{ github.workspace }}\release-repo\tools\build-installer.ps1" `
             -BinPath $BIN `
@@ -100,6 +100,7 @@ jobs:
 
       - name: Upload to GitHub Release
         if: always()
+        shell: bash
         env:
           TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
         run: |
