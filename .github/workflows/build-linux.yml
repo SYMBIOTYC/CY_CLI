@@ -46,20 +46,20 @@ jobs:
           cache: true
 
       - name: Build release binary
-        working-directory: cy-cli-private/.fundament/codex-rs
+        working-directory: cy-cli-private/.fundament/cx-rs
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
       - name: Strip binary (non-Windows)
         if: matrix.os != 'windows'
         run: |
-          strip cy-cli-private/.fundament/codex-rs/target/${{ matrix.target }}/release/cy || true
-          upx --best --lzma cy-cli-private/.fundament/codex-rs/target/${{ matrix.target }}/release/cy || true
+          strip cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy || true
+          upx --best --lzma cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy || true
 
       - name: Package Linux artifact
         if: matrix.os == 'linux'
         shell: bash
         run: |
-          BIN="cy-cli-private/.fundament/codex-rs/target/${{ matrix.target }}/release/cy"
+          BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           cp "$BIN" cy
           tar czf ${{ matrix.artifact }} cy
           sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
