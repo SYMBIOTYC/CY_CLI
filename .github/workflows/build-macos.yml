@@ -48,7 +48,7 @@ jobs:
 
       - name: Remove repo rust-toolchain override
         shell: bash
-        run: rm -f cy-cli-private/.fundament/codex-rs/rust-toolchain.toml
+        run: rm -f cy-cli-private/.fundament/cx-rs/rust-toolchain.toml
 
       - name: Install Rust via rustup
         shell: bash
@@ -65,12 +65,12 @@ jobs:
           rustup run 1.95.0 x86_64-apple-darwin rustc --version || echo "x86_64 rustc failed"
 
       - name: Build release binary
-        working-directory: cy-cli-private/.fundament/codex-rs
+        working-directory: cy-cli-private/.fundament/cx-rs
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
       - name: Package macOS .dmg
         run: |
-          BIN="cy-cli-private/.fundament/codex-rs/target/${{ matrix.target }}/release/cy"
+          BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           APP_NAME="${{ matrix.app_name }}"
           DMG_NAME="${{ matrix.artifact }}"
 
