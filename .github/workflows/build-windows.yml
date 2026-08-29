@@ -38,8 +38,8 @@ jobs:
       - name: Patch recursion limit for Windows
         shell: bash
         run: |
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/exec/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/tui/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
+          find cy-cli-private/.fundament/cx-rs -name "lib.rs" -path "*/exec/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
+          find cy-cli-private/.fundament/cx-rs -name "lib.rs" -path "*/tui/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -48,7 +48,7 @@ jobs:
           cache: true
 
       - name: Patch mio for Windows
-        working-directory: cy-cli-private/.fundament/codex-rs
+        working-directory: cy-cli-private/.fundament/cx-rs
         run: |
           cargo update -p mio
           cargo tree -p mio
@@ -56,18 +56,18 @@ jobs:
       - name: Patch recursion limit for Windows
         shell: bash
         run: |
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/exec/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
-          find cy-cli-private/.fundament/codex-rs -name "lib.rs" -path "*/tui/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
+          find cy-cli-private/.fundament/cx-rs -name "lib.rs" -path "*/exec/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
+          find cy-cli-private/.fundament/cx-rs -name "lib.rs" -path "*/tui/*" -exec sed -i '1i #![recursion_limit = "256"]' {} +
 
       - name: Build release binary
-        working-directory: cy-cli-private/.fundament/codex-rs
+        working-directory: cy-cli-private/.fundament/cx-rs
         run: cargo build --bin cy --release --target x86_64-pc-windows-msvc
         timeout-minutes: 120
 
       - name: Package Windows artifact
         shell: bash
         run: |
-          BIN="cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
+          BIN="cy-cli-private/.fundament/cx-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
           cp "$BIN" cy.exe
           powershell Compress-Archive -Path cy.exe -DestinationPath cy-x86_64-pc-windows-msvc.zip
           powershell -Command "Get-FileHash -Algorithm SHA256 cy-x86_64-pc-windows-msvc.zip | Select-Object -ExpandProperty Hash | Out-File -FilePath cy-x86_64-pc-windows-msvc.zip.sha256"
@@ -76,7 +76,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $BIN = "cy-cli-private/.fundament/codex-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
+          $BIN = "cy-cli-private/.fundament/cx-rs/target/x86_64-pc-windows-msvc/release/cy.exe"
           $WRAPPER = "${{ github.workspace }}\release-repo\tools\cy-wrapper.ps1"
           $VERSION = "${{ github.event.inputs.tag || github.event.client_payload.tag }}".TrimStart('v')
 
