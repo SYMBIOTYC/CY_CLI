@@ -157,16 +157,16 @@ jobs:
             ERRORS=$((ERRORS + 1))
           fi
 
-          # Check osascript
-          if grep -q 'tell application "Terminal"' "$LAUNCHER"; then
+          # Check osascript (printf with \\" creates \" in file)
+          if grep -q 'tell application' "$LAUNCHER" && grep -q 'Terminal' "$LAUNCHER"; then
             echo "OK: osascript tell application present"
           else
             echo "FAIL: osascript missing tell application"
             ERRORS=$((ERRORS + 1))
           fi
 
-          # Check do script
-          if grep -q 'do script "$CY_BIN"' "$LAUNCHER"; then
+          # Check do script (printf with \\" creates \" in file)
+          if grep -q 'do script' "$LAUNCHER" && grep -q 'CY_BIN' "$LAUNCHER"; then
             echo "OK: do script with CY_BIN present"
           else
             echo "FAIL: do script missing"
