@@ -12,7 +12,7 @@ on:
       tag:
         description: 'Git tag or branch to build'
         required: true
-        default: 'v0.1.5'
+        default: 'v0.2.0'
 
 permissions:
   contents: write
@@ -59,10 +59,6 @@ jobs:
           rustup component add rust-std --target aarch64-apple-darwin
           rustup component add rust-std --target x86_64-apple-darwin
           rustup component add rust-src
-          echo "=== Target list ==="
-          rustup target list --installed
-          echo "=== x86_64 rustc check ==="
-          rustup run 1.95.0 x86_64-apple-darwin rustc --version || echo "x86_64 rustc failed"
 
       - name: Build release binary
         working-directory: cy-cli-private/.fundament/cx-rs
@@ -74,7 +70,25 @@ jobs:
           RUSTFLAGS: "-C link-arg=-Wl,-no_objc_relative_method_lists"
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
-      - name: Package macOS .dmg
+      - name: Patch binary branding
+        run: |
+          BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
+          if [ -f "$BIN" ]; then
+            echo "Patching branding strings..."
+            # Version: v0.0.0 -> v0.2.0 (same length, safe)
+            LC_ALL=C sed -i '' 's/v0\.0\.0/v0.2.0/g' "$BIN"
+            # Codex CLI -> CY CLI  (pad shorter with spaces or null)
+            LC_ALL=C sed -i '' 's/Codex CLI/CY CLI /g' "$BIN"
+            # OpenAI Codex -> SYMBIOTYC CY
+            LC_ALL=C sed -i '' 's/OpenAI Codex/SYMBIOTYC CY/g' "$BIN"
+            # Ask Codex -> Ask CY
+            LC_ALL=C sed -i '' 's/Ask Codex/Ask CY  /g' "$BIN"
+            # cy/i1a default -> CY | i1a
+            LC_ALL=C sed -i '' 's/cy\/i1a default/CY | i1a    /g' "$BIN"
+            echo "Branding patched."
+          fi
+
+      - name: Package macOS .app
         run: |
           BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           APP_NAME="${{ matrix.app_name }}"
@@ -86,15 +100,40 @@ jobs:
           cp "$BIN" "$APP_NAME/Contents/MacOS/cy"
           chmod +x "$APP_NAME/Contents/MacOS/cy"
 
-          cp icon.icns "$APP_NAME/Contents/Resources/icon.icns"
+          # Launcher: opens Terminal with cy, closes extra windows
+          cat > "$APP_NAME/Contents/MacOS/launcher" << 'LAUNCHER'
+          #!/bin/bash
+          CY_BIN="/Applications/CY-CLI.app/Contents/MacOS/cy"
+          osascript -e "
+          tell application \"Terminal\"
+              activate
+              set winList to windows
+              set initialCount to count of winList
+              do script \"$CY_BIN\"
+              delay 0.5
+              -- close the initial blank window if Terminal was freshly opened
+              if initialCount = 0 then
+                  if (count of windows) > 1 then
+                      close (window 1)
+                  end if
+              end if
+          end tell
+          "
+          LAUNCHER
+          chmod +x "$APP_NAME/Contents/MacOS/launcher"
 
-          cat > "$APP_NAME/Contents/Info.plist" << 'EOF'
+          # Icon
+          if [ -f icon.icns ]; then
+            cp icon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
+          fi
+
+          cat > "$APP_NAME/Contents/Info.plist" << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>CFBundleExecutable</key>
-            <string>cy</string>
+            <string>launcher</string>
             <key>CFBundleIdentifier</key>
             <string>com.symbiotyc.cy-cli</string>
             <key>CFBundleName</key>
@@ -102,20 +141,22 @@ jobs:
             <key>CFBundleDisplayName</key>
             <string>CY-CLI</string>
             <key>CFBundleVersion</key>
-            <string>1.0.0</string>
+            <string>0.2.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.2.0</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
-            <key>CFBundleSignature</key>
-            <string>????</string>
             <key>CFBundleIconFile</key>
-            <string>icon.icns</string>
+            <string>AppIcon</string>
             <key>LSMinimumSystemVersion</key>
-            <string>13.0</string>
+            <string>14.0</string>
             <key>NSHighResolutionCapable</key>
             <true/>
+            <key>LSUIElement</key>
+            <false/>
           </dict>
           </plist>
-          EOF
+          PLIST
 
           hdiutil create -volname "CY-CLI" -srcfolder "$APP_NAME" -ov -format UDZO "$DMG_NAME"
           echo "Created $DMG_NAME"
