@@ -64,7 +64,7 @@ jobs:
         working-directory: cy-cli-private/.fundament/cx-rs
         env:
           MACOSX_DEPLOYMENT_TARGET: "14.0"
-          CARGO_PROFILE_RELEASE_LTO: "fat"
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: "s"
           RUSTFLAGS: "-C link-arg=-Wl,-no_objc_relative_method_lists"
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
