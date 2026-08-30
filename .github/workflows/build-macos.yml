@@ -66,6 +66,8 @@ jobs:
 
       - name: Build release binary
         working-directory: cy-cli-private/.fundament/cx-rs
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "14.0"
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
       - name: Package macOS .dmg
