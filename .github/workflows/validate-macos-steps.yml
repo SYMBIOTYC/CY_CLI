@@ -226,7 +226,7 @@ jobs:
             <key>CFBundleIconFile</key>
             <string>AppIcon</string>
             <key>LSMinimumSystemVersion</key>
-            <string>14.0</string>
+            <string>13.0</string>
             <key>NSHighResolutionCapable</key>
             <true/>
           </dict>
@@ -285,8 +285,8 @@ jobs:
             ERRORS=$((ERRORS + 1))
           fi
 
-          if grep -A1 "LSMinimumSystemVersion" "$PLIST" | grep -q "14.0"; then
-            echo "OK: LSMinimumSystemVersion = 14.0"
+          if grep -A1 "LSMinimumSystemVersion" "$PLIST" | grep -q "13.0"; then
+            echo "OK: LSMinimumSystemVersion = 13.0"
           else
             echo "FAIL: LSMinimumSystemVersion wrong"
             ERRORS=$((ERRORS + 1))
@@ -335,7 +335,7 @@ jobs:
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>LSMinimumSystemVersion</key>
-            <string>14.0</string>
+            <string>13.0</string>
           </dict>
           </plist>
           PLISTEOF
