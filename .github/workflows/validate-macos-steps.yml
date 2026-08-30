@@ -1,0 +1,444 @@
+name: Validate macOS Build Steps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  validate-binary-patch:
+    name: Patch binary branding
+    runs-on: macos-14
+    steps:
+      - name: Create mock binary
+        run: |
+          mkdir -p mock-bin
+          python3 -c "
+          # Create a mock binary with known strings
+          data = b'\\x00' * 1000
+          data += b'Codex CLI v0.0.0'
+          data += b'\\x00' * 100
+          data += b'Codex Apps menu'
+          data += b'\\x00' * 100
+          data += b'Codex host https'
+          data += b'\\x00' * 100
+          data += b'Codex binary path'
+          data += b'\\x00' * 100
+          data += b'Codex session id'
+          data += b'\\x00' * 100
+          data += b'Codex To continue'
+          data += b'\\x00' * 100
+          data += b'Codex build error msg'
+          data += b'\\x00' * 100
+          data += b'standalone Codex mode'
+          data += b'\\x00' * 100
+          data += b'Ask Code to run'
+          data += b'\\x00' * 100
+          data += b'OpenAI API key'
+          data += b'\\x00' * 100
+          data += b'OpenAI file upload'
+          data += b'\\x00' * 100
+          with open('mock-bin/cy', 'wb') as f:
+              f.write(data)
+          "
+
+      - name: Run patch script
+        run: |
+          BIN="mock-bin/cy"
+          python3 -c "
+          import sys
+          with open(sys.argv[1], 'rb') as f:
+              data = f.read()
+
+          patches = [
+              (b'0.0.0', b'0.2.0'),
+              (b'Codex CLI', b'CY CLI   '),
+              (b'Codex Apps', b'CY    Apps'),
+              (b'Codex host', b'CY    host'),
+              (b'Codex binary', b'CY    binary'),
+              (b'Codex session', b'CY    session'),
+              (b'Codex To', b'CY    To'),
+              (b'Codex build error', b'CY build error   '),
+              (b'standalone Codex', b'standalone CY   '),
+              (b'Ask Code', b'Ask CY  '),
+              (b'OpenAI API', b'SYMBIOTYC '),
+              (b'OpenAI file', b'SYMBIOTYC  '),
+          ]
+
+          count = 0
+          for old, new in patches:
+              if len(old) != len(new):
+                  print(f'SKIP: {old} ({len(old)}) != {new} ({len(new)})')
+                  continue
+              n = data.count(old)
+              if n > 0:
+                  data = data.replace(old, new)
+                  print(f'OK: {old} -> {new} ({n}x)')
+                  count += n
+
+          with open(sys.argv[1], 'wb') as f:
+              f.write(data)
+          print(f'Patched: {count}')
+          " "$BIN"
+
+      - name: Validate patches
+        run: |
+          BIN="mock-bin/cy"
+          DATA=$(cat "$BIN")
+
+          ERRORS=0
+
+          # Check all patches applied
+          for expected in "CY CLI" "CY    Apps" "CY    host" "CY    binary" "CY    session" "CY    To" "CY build error" "standalone CY" "Ask CY" "SYMBIOTYC" "0.2.0"; do
+            if echo "$DATA" | grep -q "$expected"; then
+              echo "  OK: found '$expected'"
+            else
+              echo "  FAIL: missing '$expected'"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          # Check old strings are gone
+          for old in "Codex CLI" "Codex Apps" "OpenAI API" "OpenAI file" "Ask Code" "0.0.0"; do
+            if echo "$DATA" | grep -q "$old"; then
+              echo "  FAIL: old string still present '$old'"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "  OK: removed '$old'"
+            fi
+          done
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "OK: Binary branding patches validated"
+          else
+            echo "FAIL: $ERRORS errors"
+            exit 1
+          fi
+
+  validate-launcher:
+    name: Create launcher script
+    runs-on: macos-14
+    steps:
+      - name: Run launcher creation
+        run: |
+          APP_NAME="CY-CLI-test.app"
+          mkdir -p "$APP_NAME/Contents/MacOS"
+          printf '#!/bin/bash\nCY_BIN="/Applications/CY-CLI.app/Contents/MacOS/cy"\nosascript -e "\ntell application \\"Terminal\\"\\n    activate\\n    set initialCount to count of windows\\n    do script \\"$CY_BIN\\"\\n    delay 0.5\\n    if initialCount = 0 then\\n        if (count of windows) > 1 then\\n            close (window 1)\\n        end if\\n    end if\\nend tell\\n"\n' > "$APP_NAME/Contents/MacOS/launcher"
+          chmod +x "$APP_NAME/Contents/MacOS/launcher"
+          echo "Launcher created"
+
+      - name: Validate launcher
+        run: |
+          APP_NAME="CY-CLI-test.app"
+          LAUNCHER="$APP_NAME/Contents/MacOS/launcher"
+          ERRORS=0
+
+          # Check file exists
+          if [ ! -f "$LAUNCHER" ]; then
+            echo "FAIL: launcher file not found"
+            exit 1
+          fi
+
+          # Check shebang
+          if head -1 "$LAUNCHER" | grep -q "^#!/bin/bash"; then
+            echo "OK: shebang correct"
+          else
+            echo "FAIL: wrong shebang"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check CY_BIN path
+          if grep -q 'CY_BIN="/Applications/CY-CLI.app/Contents/MacOS/cy"' "$LAUNCHER"; then
+            echo "OK: CY_BIN path correct"
+          else
+            echo "FAIL: CY_BIN path wrong"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check osascript
+          if grep -q 'tell application "Terminal"' "$LAUNCHER"; then
+            echo "OK: osascript tell application present"
+          else
+            echo "FAIL: osascript missing tell application"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check do script
+          if grep -q 'do script "$CY_BIN"' "$LAUNCHER"; then
+            echo "OK: do script with CY_BIN present"
+          else
+            echo "FAIL: do script missing"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check close window logic
+          if grep -q 'close (window 1)' "$LAUNCHER"; then
+            echo "OK: close window logic present"
+          else
+            echo "FAIL: close window logic missing"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Test execute (dry run - check syntax)
+          if bash -n "$LAUNCHER"; then
+            echo "OK: bash syntax valid"
+          else
+            echo "FAIL: bash syntax error"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "OK: Launcher validated"
+          else
+            echo "FAIL: $ERRORS errors"
+            exit 1
+          fi
+
+  validate-plist:
+    name: Create Info.plist
+    runs-on: macos-14
+    steps:
+      - name: Run plist creation
+        run: |
+          APP_NAME="CY-CLI-test.app"
+          mkdir -p "$APP_NAME/Contents/Resources"
+          cat > "$APP_NAME/Contents/Info.plist" << 'PLISTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>launcher</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.symbiotyc.cy-cli</string>
+            <key>CFBundleName</key>
+            <string>CY-CLI</string>
+            <key>CFBundleDisplayName</key>
+            <string>CY-CLI</string>
+            <key>CFBundleVersion</key>
+            <string>0.2.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.2.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>14.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLISTEOF
+          echo "Info.plist created"
+
+      - name: Validate plist
+        run: |
+          PLIST="CY-CLI-test.app/Contents/Info.plist"
+          ERRORS=0
+
+          # Check file exists
+          if [ ! -f "$PLIST" ]; then
+            echo "FAIL: Info.plist not found"
+            exit 1
+          fi
+
+          # Check XML is valid
+          if xmllint --noout "$PLIST" 2>/dev/null; then
+            echo "OK: XML valid"
+          else
+            echo "FAIL: XML invalid"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check required keys
+          for key in CFBundleExecutable CFBundleIdentifier CFBundleName CFBundleVersion CFBundlePackageType LSMinimumSystemVersion; do
+            if grep -q "<key>$key</key>" "$PLIST"; then
+              echo "OK: $key present"
+            else
+              echo "FAIL: $key missing"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          # Check values
+          if grep -A1 "CFBundleExecutable" "$PLIST" | grep -q "launcher"; then
+            echo "OK: CFBundleExecutable = launcher"
+          else
+            echo "FAIL: CFBundleExecutable wrong"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if grep -A1 "CFBundleIdentifier" "$PLIST" | grep -q "com.symbiotyc.cy-cli"; then
+            echo "OK: CFBundleIdentifier = com.symbiotyc.cy-cli"
+          else
+            echo "FAIL: CFBundleIdentifier wrong"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if grep -A1 "CFBundleVersion" "$PLIST" | grep -q "0.2.0"; then
+            echo "OK: CFBundleVersion = 0.2.0"
+          else
+            echo "FAIL: CFBundleVersion wrong"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if grep -A1 "LSMinimumSystemVersion" "$PLIST" | grep -q "14.0"; then
+            echo "OK: LSMinimumSystemVersion = 14.0"
+          else
+            echo "FAIL: LSMinimumSystemVersion wrong"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "OK: Info.plist validated"
+          else
+            echo "FAIL: $ERRORS errors"
+            exit 1
+          fi
+
+  validate-dmg:
+    name: Package DMG
+    runs-on: macos-14
+    needs: [validate-launcher, validate-plist]
+    steps:
+      - name: Build test .app bundle
+        run: |
+          APP_NAME="CY-CLI-test.app"
+          mkdir -p "$APP_NAME/Contents/MacOS"
+          mkdir -p "$APP_NAME/Contents/Resources"
+
+          # Mock binary
+          echo "#!/bin/bash echo CY" > "$APP_NAME/Contents/MacOS/cy"
+          chmod +x "$APP_NAME/Contents/MacOS/cy"
+
+          # Launcher
+          printf '#!/bin/bash\necho "CY launcher"\n' > "$APP_NAME/Contents/MacOS/launcher"
+          chmod +x "$APP_NAME/Contents/MacOS/launcher"
+
+          # Info.plist
+          cat > "$APP_NAME/Contents/Info.plist" << 'PLISTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>launcher</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.symbiotyc.cy-cli</string>
+            <key>CFBundleName</key>
+            <string>CY-CLI</string>
+            <key>CFBundleVersion</key>
+            <string>0.2.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>14.0</string>
+          </dict>
+          </plist>
+          PLISTEOF
+
+          echo "Test .app bundle created"
+
+      - name: Validate .app structure
+        run: |
+          APP_NAME="CY-CLI-test.app"
+          ERRORS=0
+
+          for path in \
+            "$APP_NAME/Contents/MacOS/cy" \
+            "$APP_NAME/Contents/MacOS/launcher" \
+            "$APP_NAME/Contents/Info.plist" \
+          ; do
+            if [ -f "$path" ]; then
+              echo "OK: $path exists"
+            else
+              echo "FAIL: $path missing"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "OK: .app structure validated"
+          else
+            echo "FAIL: $ERRORS errors"
+            exit 1
+          fi
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "CY-CLI" -srcfolder "CY-CLI-test.app" -ov -format UDZO "cy-test.dmg"
+          echo "DMG created"
+
+      - name: Validate DMG
+        run: |
+          ERRORS=0
+
+          if [ -f "cy-test.dmg" ]; then
+            SIZE=$(ls -lh "cy-test.dmg" | awk '{print $5}')
+            echo "OK: DMG exists ($SIZE)"
+          else
+            echo "FAIL: DMG not found"
+            exit 1
+          fi
+
+          # Mount and check contents
+          MOUNT_DIR=$(mktemp -d)
+          if hdiutil attach "cy-test.dmg" -mountpoint "$MOUNT_DIR" -nobrowse -quiet; then
+            echo "OK: DMG mounted"
+
+            if [ -d "$MOUNT_DIR/CY-CLI-test.app" ]; then
+              echo "OK: .app found in DMG"
+            else
+              echo "FAIL: .app not found in DMG"
+              ERRORS=$((ERRORS + 1))
+            fi
+
+            hdiutil detach "$MOUNT_DIR" -quiet
+          else
+            echo "FAIL: DMG mount failed"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          rm -rf "$MOUNT_DIR"
+
+          if [ $ERRORS -eq 0 ]; then
+            echo "OK: DMG validated"
+          else
+            echo "FAIL: $ERRORS errors"
+            exit 1
+          fi
+
+  validation-report:
+    name: Validation Report
+    needs: [validate-binary-patch, validate-launcher, validate-plist, validate-dmg]
+    runs-on: macos-14
+    if: always()
+    steps:
+      - name: Generate report
+        run: |
+          echo "## macOS Build Steps Validation Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Binary branding patches | ${{ needs.validate-binary-patch.result == 'success' && '✅' || '❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Launcher script | ${{ needs.validate-launcher.result == 'success' && '✅' || '❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Info.plist | ${{ needs.validate-plist.result == 'success' && '✅' || '❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| DMG packaging | ${{ needs.validate-dmg.result == 'success' && '✅' || '❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          ALL_PASS=true
+          for result in "${{ needs.validate-binary-patch.result }}" "${{ needs.validate-launcher.result }}" "${{ needs.validate-plist.result }}" "${{ needs.validate-dmg.result }}"; do
+            if [ "$result" != "success" ]; then
+              ALL_PASS=false
+            fi
+          done
+
+          if [ "$ALL_PASS" = true ]; then
+            echo "**All steps validated successfully**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Some steps failed validation**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
