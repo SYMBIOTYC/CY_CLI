@@ -70,112 +70,101 @@ jobs:
           RUSTFLAGS: "-C link-arg=-Wl,-no_objc_relative_method_lists"
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
-      - name: Patch binary branding (same-length replacements only)
+      - name: Patch binary branding
+        shell: bash
         run: |
           BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
-          python3 - << 'PYEOF'
+          python3 -c "
           import sys
-          with open("$BIN", "rb") as f:
+          with open(sys.argv[1], 'rb') as f:
               data = f.read()
 
           patches = [
-              # Version: same length
-              (b"0.0.0", b"0.2.0"),
-              # Visible UI strings (must be same byte length)
-              (b"Codex CLI", b"CY CLI   "),       # 9=9
-              (b"Codex Apps", b"CY    Apps"),     # 10=10
-              (b"Codex host", b"CY    host"),     # 10=10
-              (b"Codex binary", b"CY    binary"), # 12=12
-              (b"Codex session", b"CY    session"), # 13=13
-              (b"Codex To", b"CY    To"),         # 8=8
-              (b"Codex build error", b"CY build error   "), # 17=17
-              (b"standalone Codex", b"standalone CY   "), # 16=16
-              (b"Ask Code", b"Ask CY  "),         # 8=8
-              (b"OpenAI API", b"SYMBIOTYC "),     # 10=10
-              (b"OpenAI file", b"SYMBIOTYC  "),   # 11=11
+              (b'0.0.0', b'0.2.0'),
+              (b'Codex CLI', b'CY CLI   '),
+              (b'Codex Apps', b'CY    Apps'),
+              (b'Codex host', b'CY    host'),
+              (b'Codex binary', b'CY    binary'),
+              (b'Codex session', b'CY    session'),
+              (b'Codex To', b'CY    To'),
+              (b'Codex build error', b'CY build error   '),
+              (b'standalone Codex', b'standalone CY   '),
+              (b'Ask Code', b'Ask CY  '),
+              (b'OpenAI API', b'SYMBIOTYC '),
+              (b'OpenAI file', b'SYMBIOTYC  '),
           ]
 
           count = 0
           for old, new in patches:
               if len(old) != len(new):
-                  print(f"SKIP: {old} ({len(old)}) != {new} ({len(new)})")
+                  print(f'SKIP: {old} ({len(old)}) != {new} ({len(new)})')
                   continue
               n = data.count(old)
               if n > 0:
                   data = data.replace(old, new)
-                  print(f"OK: {old} -> {new} ({n}x)")
+                  print(f'OK: {old} -> {new} ({n}x)')
                   count += n
 
-          with open("$BIN", "wb") as f:
+          with open(sys.argv[1], 'wb') as f:
               f.write(data)
-          print(f"Patched: {count}")
-          PYEOF
+          print(f'Patched: {count}')
+          " "$BIN"
+
+      - name: Create launcher script
+        shell: bash
+        run: |
+          APP_NAME="${{ matrix.app_name }}"
+          mkdir -p "$APP_NAME/Contents/MacOS"
+          printf '#!/bin/bash\nCY_BIN="/Applications/CY-CLI.app/Contents/MacOS/cy"\nosascript -e "\ntell application \\"Terminal\\"\\n    activate\\n    set initialCount to count of windows\\n    do script \\"$CY_BIN\\"\\n    delay 0.5\\n    if initialCount = 0 then\\n        if (count of windows) > 1 then\\n            close (window 1)\\n        end if\\n    end if\\nend tell\\n"\n' > "$APP_NAME/Contents/MacOS/launcher"
+          chmod +x "$APP_NAME/Contents/MacOS/launcher"
+
+      - name: Create Info.plist
+        shell: bash
+        run: |
+          APP_NAME="${{ matrix.app_name }}"
+          mkdir -p "$APP_NAME/Contents/Resources"
+          cat > "$APP_NAME/Contents/Info.plist" << 'PLISTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>launcher</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.symbiotyc.cy-cli</string>
+            <key>CFBundleName</key>
+            <string>CY-CLI</string>
+            <key>CFBundleDisplayName</key>
+            <string>CY-CLI</string>
+            <key>CFBundleVersion</key>
+            <string>0.2.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.2.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>14.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLISTEOF
 
       - name: Package macOS .app
+        shell: bash
         run: |
           BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           APP_NAME="${{ matrix.app_name }}"
           DMG_NAME="${{ matrix.artifact }}"
 
-          mkdir -p "$APP_NAME/Contents/MacOS"
-          mkdir -p "$APP_NAME/Contents/Resources"
-
           cp "$BIN" "$APP_NAME/Contents/MacOS/cy"
           chmod +x "$APP_NAME/Contents/MacOS/cy"
 
-          # Launcher: opens Terminal with cy, closes the blank initial window
-          cat > "$APP_NAME/Contents/MacOS/launcher" << 'LAUNCHER'
-#!/bin/bash
-CY_BIN="/Applications/CY-CLI.app/Contents/MacOS/cy"
-osascript -e "
-tell application \"Terminal\"
-    activate
-    set initialCount to count of windows
-    do script \"$CY_BIN\"
-    delay 0.5
-    if initialCount = 0 then
-        if (count of windows) > 1 then
-            close (window 1)
-        end if
-    end if
-end tell
-"
-LAUNCHER
-          chmod +x "$APP_NAME/Contents/MacOS/launcher"
-
-          # Icon
           if [ -f icon.icns ]; then
             cp icon.icns "$APP_NAME/Contents/Resources/AppIcon.icns"
           fi
-
-          cat > "$APP_NAME/Contents/Info.plist" << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleExecutable</key>
-  <string>launcher</string>
-  <key>CFBundleIdentifier</key>
-  <string>com.symbiotyc.cy-cli</string>
-  <key>CFBundleName</key>
-  <string>CY-CLI</string>
-  <key>CFBundleDisplayName</key>
-  <string>CY-CLI</string>
-  <key>CFBundleVersion</key>
-  <string>0.2.0</string>
-  <key>CFBundleShortVersionString</key>
-  <string>0.2.0</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>CFBundleIconFile</key>
-  <string>AppIcon</string>
-  <key>LSMinimumSystemVersion</key>
-  <string>14.0</string>
-  <key>NSHighResolutionCapable</key>
-  <true/>
-</dict>
-</plist>
-PLIST
 
           hdiutil create -volname "CY-CLI" -srcfolder "$APP_NAME" -ov -format UDZO "$DMG_NAME"
           echo "Created $DMG_NAME"
