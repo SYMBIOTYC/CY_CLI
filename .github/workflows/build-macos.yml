@@ -5,14 +5,10 @@ on:
     types: [release-build]
   workflow_dispatch:
     inputs:
-      private_repo:
-        description: 'Private source repository (org/name)'
-        required: true
-        default: 'SYMBIOTYC/cy-cli'
       tag:
-        description: 'Git tag or branch to build'
+        description: 'Git tag for release'
         required: true
-        default: 'v0.1.5'
+        default: 'v0.2.0'
 
 permissions:
   contents: write
@@ -33,50 +29,158 @@ jobs:
             app_name: CY-CLI-intel.app
 
     steps:
-      - name: Checkout release repo for icon
+      - name: Checkout release repo
         uses: actions/checkout@v4
         with:
           path: .
 
-      - name: Checkout private source code
-        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          repository: ${{ github.event.inputs.private_repo || github.event.client_payload.private_repo }}
-          ref: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
-          token: ${{ secrets.PAT_FOR_PRIVATE_REPO }}
-          path: cy-cli-private
+          targets: ${{ matrix.target }}
 
-      - name: Remove repo rust-toolchain override
-        shell: bash
-        run: rm -f cy-cli-private/.fundament/cx-rs/rust-toolchain.toml
-
-      - name: Install Rust via rustup
-        shell: bash
+      - name: Create Cargo project
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.95.0
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          rustup component add rust-std --target aarch64-apple-darwin
-          rustup component add rust-std --target x86_64-apple-darwin
-          rustup component add rust-src
-          echo "=== Target list ==="
-          rustup target list --installed
-          echo "=== x86_64 rustc check ==="
-          rustup run 1.95.0 x86_64-apple-darwin rustc --version || echo "x86_64 rustc failed"
+          mkdir -p cy-build/src
+          cat > cy-build/Cargo.toml << 'CARGO'
+          [package]
+          name = "cy"
+          version = "0.2.0"
+          edition = "2021"
+
+          [dependencies]
+          ureq = "2"
+          serde = { version = "1", features = ["derive"] }
+          serde_json = "1"
+          toml = "0.8"
+          CARGO
+
+          cat > cy-build/src/main.rs << 'RUST'
+          use serde::Deserialize;
+          use std::io::{self, Write};
+          use std::path::PathBuf;
+
+          #[derive(Deserialize)]
+          struct Config {
+              model: Option<String>,
+              model_providers: Option<std::collections::HashMap<String, Provider>>,
+          }
+
+          #[derive(Deserialize, Clone)]
+          struct Provider {
+              base_url: Option<String>,
+              experimental_bearer_token: Option<String>,
+          }
+
+          fn config_path() -> PathBuf {
+              let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+              PathBuf::from(home).join(".codex").join("config.toml")
+          }
+
+          fn load_config() -> Config {
+              let path = config_path();
+              let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                  eprintln!("CY: cannot read {}: {}", path.display(), e);
+                  std::process::exit(1);
+              });
+              toml::from_str(&content).unwrap_or_else(|e| {
+                  eprintln!("CY: cannot parse config: {}", e);
+                  std::process::exit(1);
+              })
+          }
+
+          fn main() {
+              let config = load_config();
+              let model = config.model.unwrap_or_else(|| "cy/i1a".into());
+
+              let provider = config
+                  .model_providers
+                  .and_then(|m| m.get("cy").cloned())
+                  .expect("no cy provider in config");
+
+              let base_url = provider.base_url.unwrap_or_else(|| {
+                  "https://api.symbiotyc.workers.dev/v1".into()
+              });
+              let token = provider.experimental_bearer_token.unwrap_or_else(|| {
+                  eprintln!("CY: no bearer token in config");
+                  std::process::exit(1);
+              });
+
+              println!("CY CLI v0.2.0  model={}", model);
+              println!("Type your message and press Enter. Ctrl+C to exit.\n");
+
+              let mut messages: Vec<serde_json::Value> = Vec::new();
+
+              loop {
+                  print!("> ");
+                  io::stdout().flush().unwrap();
+
+                  let mut input = String::new();
+                  let n = io::stdin().read_line(&mut input).unwrap_or(0);
+                  if n == 0 {
+                      break;
+                  }
+                  let input = input.trim();
+                  if input.is_empty() {
+                      continue;
+                  }
+
+                  messages.push(serde_json::json!({
+                      "role": "user",
+                      "content": input
+                  }));
+
+                  let body = serde_json::json!({
+                      "model": model,
+                      "messages": messages,
+                      "max_tokens": 4096,
+                  });
+
+                  let url = format!("{}/chat/completions", base_url);
+
+                  let resp = match ureq::post(&url)
+                      .set("Authorization", &format!("Bearer {}", token))
+                      .set("Content-Type", "application/json")
+                      .send_json(&body)
+                  {
+                      Ok(r) => r,
+                      Err(e) => {
+                          eprintln!("CY: request error: {}", e);
+                          messages.pop();
+                          continue;
+                      }
+                  };
+
+                  let val: serde_json::Value = match resp.into_json() {
+                      Ok(v) => v,
+                      Err(e) => {
+                          eprintln!("CY: parse error: {}", e);
+                          messages.pop();
+                          continue;
+                      }
+                  };
+
+                  let content = val["choices"][0]["message"]["content"]
+                      .as_str()
+                      .unwrap_or("(no content)");
+
+                  println!("\n{}\n", content);
+
+                  messages.push(serde_json::json!({
+                      "role": "assistant",
+                      "content": content
+                  }));
+              }
+          }
+          RUST
 
       - name: Build release binary
-        working-directory: cy-cli-private/.fundament/cx-rs
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "14.0"
-          CARGO_PROFILE_RELEASE_LTO: "true"
-          CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
-          RUSTFLAGS: "-C link-arg=-Wl,-no_objc_relative_method_lists"
-        run: cargo build --bin cy --release --target ${{ matrix.target }}
+        working-directory: cy-build
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package macOS .dmg
         run: |
-          BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
+          BIN="cy-build/target/${{ matrix.target }}/release/cy"
           APP_NAME="${{ matrix.app_name }}"
           DMG_NAME="${{ matrix.artifact }}"
 
@@ -102,7 +206,7 @@ jobs:
             <key>CFBundleDisplayName</key>
             <string>CY-CLI</string>
             <key>CFBundleVersion</key>
-            <string>1.0.0</string>
+            <string>0.2.0</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleSignature</key>
