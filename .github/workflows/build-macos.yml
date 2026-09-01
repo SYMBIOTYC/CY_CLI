@@ -38,12 +38,11 @@ jobs:
         with:
           path: .
 
-      - name: Checkout private source code
+      - name: Checkout source code
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.private_repo || github.event.client_payload.private_repo }}
           ref: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
-          token: ${{ secrets.PAT_FOR_PRIVATE_REPO }}
           path: cy-cli-private
 
       - name: Remove repo rust-toolchain override
