@@ -5,10 +5,14 @@ on:
     types: [release-build]
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Git tag for release'
+      private_repo:
+        description: 'Private source repository (org/name)'
         required: true
-        default: 'v0.2.0'
+        default: 'SYMBIOTYC/cy-cli'
+      tag:
+        description: 'Git tag or branch to build'
+        required: true
+        default: 'v0.1.5'
 
 permissions:
   contents: write
@@ -29,437 +33,44 @@ jobs:
             app_name: CY-CLI-intel.app
 
     steps:
-      - name: Checkout release repo
+      - name: Checkout release repo for icon
         uses: actions/checkout@v4
         with:
           path: .
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout private source code
+        uses: actions/checkout@v4
         with:
-          targets: ${{ matrix.target }}
+          repository: ${{ github.event.inputs.private_repo || github.event.client_payload.private_repo }}
+          ref: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+          token: ${{ secrets.PAT_FOR_PRIVATE_REPO }}
+          path: cy-cli-private
 
-      - name: Create Cargo project
+      - name: Remove repo rust-toolchain override
+        shell: bash
+        run: rm -f cy-cli-private/.fundament/cx-rs/rust-toolchain.toml
+
+      - name: Install Rust via rustup
+        shell: bash
         run: |
-          mkdir -p cy-build/src
-          cat > cy-build/Cargo.toml << 'CARGO'
-          [package]
-          name = "cy"
-          version = "0.2.0"
-          edition = "2021"
-
-          [dependencies]
-          ratatui = "0.29"
-          crossterm = "0.28"
-          ureq = { version = "2", features = ["json"] }
-          serde = { version = "1", features = ["derive"] }
-          serde_json = "1"
-          toml = "0.8"
-
-          [profile.release]
-          lto = true
-          opt-level = "z"
-          codegen-units = 1
-          CARGO
-
-          cat > cy-build/src/main.rs << 'RUST'
-          use crossterm::{
-              event::{self, Event, KeyCode, KeyModifiers},
-              execute,
-              terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-          };
-          use ratatui::{
-              backend::CrosstermBackend,
-              layout::{Constraint, Direction, Layout},
-              style::{Color, Modifier, Style},
-              text::{Line, Span},
-              widgets::{Block, Borders, Paragraph, Wrap},
-              Frame, Terminal,
-          };
-          use serde::Deserialize;
-          use std::io;
-          use std::path::PathBuf;
-          use std::time::Instant;
-
-          #[derive(Deserialize)]
-          struct Config {
-              model: Option<String>,
-              model_providers: Option<std::collections::HashMap<String, Provider>>,
-          }
-
-          #[derive(Deserialize, Clone)]
-          struct Provider {
-              base_url: Option<String>,
-              experimental_bearer_token: Option<String>,
-          }
-
-          fn config_path() -> PathBuf {
-              let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-              PathBuf::from(home).join(".codex").join("config.toml")
-          }
-
-          fn load_config() -> Config {
-              let path = config_path();
-              let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-                  eprintln!("CY: cannot read {}: {}", path.display(), e);
-                  std::process::exit(1);
-              });
-              toml::from_str(&content).unwrap_or_else(|e| {
-                  eprintln!("CY: cannot parse config: {}", e);
-                  std::process::exit(1);
-              })
-          }
-
-          enum Message {
-              User(String),
-              Assistant(String),
-              Error(String),
-          }
-
-          struct App {
-              input: String,
-              messages: Vec<Message>,
-              scroll: u16,
-              loading: bool,
-              model: String,
-              exit: bool,
-              base_url: String,
-              token: String,
-              start_time: Instant,
-              last_response: String,
-          }
-
-          impl App {
-              fn new(model: String, base_url: String, token: String) -> Self {
-                  Self {
-                      input: String::new(),
-                      messages: Vec::new(),
-                      scroll: 0,
-                      loading: false,
-                      model,
-                      exit: false,
-                      base_url,
-                      token,
-                      start_time: Instant::now(),
-                      last_response: String::new(),
-                  }
-              }
-
-              fn send_message(&mut self) {
-                  if self.input.trim().is_empty() || self.loading {
-                      return;
-                  }
-
-                  let user_msg = self.input.trim().to_string();
-                  self.messages.push(Message::User(user_msg.clone()));
-                  self.input.clear();
-                  self.loading = true;
-                  self.start_time = Instant::now();
-
-                  let mut api_messages: Vec<serde_json::Value> = Vec::new();
-                  for msg in &self.messages {
-                      match msg {
-                          Message::User(content) => {
-                              api_messages.push(serde_json::json!({"role": "user", "content": content}));
-                          }
-                          Message::Assistant(content) => {
-                              api_messages.push(serde_json::json!({"role": "assistant", "content": content}));
-                          }
-                          _ => {}
-                      }
-                  }
-
-                  let body = serde_json::json!({
-                      "model": self.model,
-                      "messages": api_messages,
-                      "max_tokens": 4096,
-                  });
-
-                  let url = format!("{}/chat/completions", self.base_url);
-
-                  match ureq::post(&url)
-                      .set("Authorization", &format!("Bearer {}", self.token))
-                      .set("Content-Type", "application/json")
-                      .send_json(&body)
-                  {
-                      Ok(resp) => match resp.into_json::<serde_json::Value>() {
-                          Ok(val) => {
-                              let content = val["choices"][0]["message"]["content"]
-                                  .as_str()
-                                  .unwrap_or("(no content)")
-                                  .to_string();
-                              self.last_response = content.clone();
-                              self.messages.push(Message::Assistant(content));
-                          }
-                          Err(e) => {
-                              self.last_response = format!("ERROR: {}", e);
-                              self.messages.push(Message::Error(format!("Parse error: {}", e)));
-                          }
-                      },
-                      Err(e) => {
-                          self.last_response = format!("ERROR: {}", e);
-                          self.messages.push(Message::Error(format!("Request error: {}", e)));
-                      }
-                  }
-
-                  self.loading = false;
-              }
-          }
-
-          fn draw(frame: &mut Frame, app: &App) {
-              let size = frame.area();
-
-              let chunks = Layout::default()
-                  .direction(Direction::Vertical)
-                  .constraints([
-                      Constraint::Length(7),
-                      Constraint::Length(2),
-                      Constraint::Min(5),
-                      Constraint::Length(1),
-                      Constraint::Length(1),
-                      Constraint::Length(3),
-                  ])
-                  .split(size);
-
-              let header_block = Block::default()
-                  .borders(Borders::ALL)
-                  .border_style(Style::default().fg(Color::Cyan))
-                  .title(Span::styled(
-                      " >_ CY CLI (v0.2.0) ",
-                      Style::default()
-                          .fg(Color::White)
-                          .add_modifier(Modifier::BOLD),
-                  ));
-
-              let header_text = vec![
-                  Line::from(""),
-                  Line::from(vec![
-                      Span::styled("model:       ", Style::default().fg(Color::Gray)),
-                      Span::styled(&app.model, Style::default().fg(Color::Green)),
-                      Span::styled(" none   /model to change", Style::default().fg(Color::DarkGray)),
-                  ]),
-                  Line::from(vec![
-                      Span::styled("directory:   ~", Style::default().fg(Color::Gray)),
-                  ]),
-                  Line::from(vec![
-                      Span::styled("permissions: YOLO mode", Style::default().fg(Color::Gray)),
-                  ]),
-                  Line::from(""),
-              ];
-
-              let header = Paragraph::new(header_text).block(header_block);
-              frame.render_widget(header, chunks[0]);
-
-              let tip = Paragraph::new(vec![
-                  Line::from(vec![
-                      Span::styled(
-                          "  Tip: CY CLI - чат-интерфейс для CY API. Ctrl+C для выхода.",
-                          Style::default().fg(Color::DarkGray),
-                      ),
-                  ]),
-                  Line::from(""),
-              ]);
-              frame.render_widget(tip, chunks[1]);
-
-              let chat_block = Block::default()
-                  .borders(Borders::ALL)
-                  .border_style(Style::default().fg(Color::Cyan));
-
-              let mut chat_lines: Vec<Line> = Vec::new();
-
-              for msg in &app.messages {
-                  match msg {
-                      Message::User(content) => {
-                          chat_lines.push(Line::from(vec![
-                              Span::styled("› ", Style::default().fg(Color::Yellow)),
-                              Span::styled(content.as_str(), Style::default().fg(Color::White)),
-                          ]));
-                          chat_lines.push(Line::from(""));
-                      }
-                      Message::Assistant(content) => {
-                          chat_lines.push(Line::from(vec![
-                              Span::styled("• ", Style::default().fg(Color::Cyan)),
-                              Span::styled(content.as_str(), Style::default().fg(Color::Green)),
-                          ]));
-                          chat_lines.push(Line::from(""));
-                      }
-                      Message::Error(content) => {
-                          chat_lines.push(Line::from(vec![
-                              Span::styled("⚠ ", Style::default().fg(Color::Red)),
-                              Span::styled(content.as_str(), Style::default().fg(Color::Red)),
-                          ]));
-                          chat_lines.push(Line::from(""));
-                      }
-                  }
-              }
-
-              if app.loading {
-                  let elapsed = app.start_time.elapsed().as_secs();
-                  chat_lines.push(Line::from(vec![
-                      Span::styled("• Working (", Style::default().fg(Color::Yellow)),
-                      Span::styled(format!("{}s", elapsed), Style::default().fg(Color::Yellow)),
-                      Span::styled(" • esc to interrupt)", Style::default().fg(Color::Yellow)),
-                  ]));
-              }
-
-              let chat = Paragraph::new(chat_lines)
-                  .block(chat_block)
-                  .scroll((app.scroll, 0))
-                  .wrap(Wrap { trim: false });
-              frame.render_widget(chat, chunks[2]);
-
-              frame.render_widget(Paragraph::new(""), chunks[3]);
-
-              let status = Paragraph::new(Line::from(vec![
-                  Span::styled(
-                      format!("  {} default · ~", app.model),
-                      Style::default().fg(Color::Gray),
-                  ),
-              ]));
-              frame.render_widget(status, chunks[4]);
-
-              let input_block = Block::default()
-                  .borders(Borders::ALL)
-                  .border_style(Style::default().fg(Color::Cyan));
-
-              let input_text = if app.input.is_empty() && !app.loading {
-                  Line::from(vec![
-                      Span::styled("> ", Style::default().fg(Color::Yellow)),
-                      Span::styled("Ask CY to do anything", Style::default().fg(Color::DarkGray)),
-                  ])
-              } else {
-                  Line::from(vec![
-                      Span::styled("> ", Style::default().fg(Color::Yellow)),
-                      Span::styled(&app.input, Style::default().fg(Color::White)),
-                  ])
-              };
-
-              let input = Paragraph::new(input_text).block(input_block);
-              frame.render_widget(input, chunks[5]);
-          }
-
-          fn main() -> Result<(), Box<dyn std::error::Error>> {
-              let config = load_config();
-              let model = config.model.unwrap_or_else(|| "cy/i1a".into());
-
-              let provider = config
-                  .model_providers
-                  .and_then(|m| m.get("cy").cloned())
-                  .expect("no cy provider in config");
-
-              let base_url = provider
-                  .base_url
-                  .unwrap_or_else(|| "https://api.symbiotyc.workers.dev/v1".into());
-              let token = provider
-                  .experimental_bearer_token
-                  .unwrap_or_else(|| {
-                      eprintln!("CY: no bearer token in config");
-                      std::process::exit(1);
-                  });
-
-              if std::env::args().any(|a| a == "--test") {
-                  let body = serde_json::json!({
-                      "model": model,
-                      "messages": [{"role": "user", "content": "Привет"}],
-                      "max_tokens": 100,
-                  });
-                  let url = format!("{}/chat/completions", base_url);
-                  match ureq::post(&url)
-                      .set("Authorization", &format!("Bearer {}", token))
-                      .set("Content-Type", "application/json")
-                      .send_json(&body)
-                  {
-                      Ok(resp) => match resp.into_json::<serde_json::Value>() {
-                          Ok(val) => {
-                              let content = val["choices"][0]["message"]["content"]
-                                  .as_str()
-                                  .unwrap_or("(no content)");
-                              println!("OK: {}", content);
-                          }
-                          Err(e) => {
-                              eprintln!("ERROR: {}", e);
-                              std::process::exit(1);
-                          }
-                      },
-                      Err(e) => {
-                          eprintln!("ERROR: {}", e);
-                          std::process::exit(1);
-                      }
-                  }
-                  return Ok(());
-              }
-
-              enable_raw_mode()?;
-              let mut stdout = io::stdout();
-              execute!(stdout, EnterAlternateScreen)?;
-              let backend = CrosstermBackend::new(stdout);
-              let mut terminal = Terminal::new(backend)?;
-
-              let mut app = App::new(model, base_url, token);
-
-              loop {
-                  terminal.draw(|f| draw(f, &app))?;
-
-                  if event::poll(std::time::Duration::from_millis(100))? {
-                      if let Event::Key(key) = event::read()? {
-                          match key.code {
-                              KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                  app.exit = true;
-                              }
-                              KeyCode::Esc => {
-                                  if app.loading {
-                                      app.loading = false;
-                                  }
-                              }
-                              KeyCode::Enter => {
-                                  app.send_message();
-                              }
-                              KeyCode::Char(c) => {
-                                  app.input.push(c);
-                              }
-                              KeyCode::Backspace => {
-                                  app.input.pop();
-                              }
-                              KeyCode::Up => {
-                                  if app.scroll > 0 {
-                                      app.scroll -= 1;
-                                  }
-                              }
-                              KeyCode::Down => {
-                                  app.scroll += 1;
-                              }
-                              _ => {}
-                          }
-                      }
-                  }
-
-                  if app.exit {
-                      break;
-                  }
-              }
-
-              disable_raw_mode()?;
-              execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-              terminal.show_cursor()?;
-
-              Ok(())
-          }
-          RUST
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.95.0
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup component add rust-std --target aarch64-apple-darwin
+          rustup component add rust-std --target x86_64-apple-darwin
+          rustup component add rust-src
+          echo "=== Target list ==="
+          rustup target list --installed
+          echo "=== x86_64 rustc check ==="
+          rustup run 1.95.0 x86_64-apple-darwin rustc --version || echo "x86_64 rustc failed"
 
       - name: Build release binary
-        working-directory: cy-build
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Test binary
-        working-directory: cy-build
-        run: |
-          BIN="target/${{ matrix.target }}/release/cy"
-          chmod +x "$BIN"
-          "$BIN" --test || true
+        working-directory: cy-cli-private/.fundament/cx-rs
+        run: cargo build --bin cy --release --target ${{ matrix.target }}
 
       - name: Package macOS .dmg
         run: |
-          BIN="cy-build/target/${{ matrix.target }}/release/cy"
+          BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           APP_NAME="${{ matrix.app_name }}"
           DMG_NAME="${{ matrix.artifact }}"
 
@@ -485,7 +96,7 @@ jobs:
             <key>CFBundleDisplayName</key>
             <string>CY-CLI</string>
             <key>CFBundleVersion</key>
-            <string>0.2.0</string>
+            <string>1.0.0</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleSignature</key>
