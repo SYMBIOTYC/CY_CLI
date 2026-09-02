@@ -49,6 +49,19 @@ jobs:
         shell: bash
         run: rm -f cy-cli-private/.fundament/cx-rs/rust-toolchain.toml
 
+      - name: Remove -no_deduplicate linker flag for aarch64
+        shell: bash
+        run: |
+          CONFIG="cy-cli-private/.fundament/cx-rs/.cargo/config.toml"
+          if [ -f "$CONFIG" ]; then
+            sed -i '' '/-Wl,-no_deduplicate/d' "$CONFIG"
+            sed -i '' '/\[target.aarch64-apple-darwin\]/d' "$CONFIG"
+            echo "=== .cargo/config.toml after patch ==="
+            cat "$CONFIG"
+          else
+            echo "No .cargo/config.toml found (nothing to patch)"
+          fi
+
       - name: Install Rust via rustup
         shell: bash
         run: |
