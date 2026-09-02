@@ -317,11 +317,18 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
+            self.send_header("Connection", "close")
+            self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             for chunk in _build_sse_stream(chat_resp, model):
                 self.wfile.write(chunk)
                 self.wfile.flush()
+            # Force the response to terminate so HTTP/1.1 clients see the end
+            # of the stream instead of waiting for keep-alive idle timeout.
+            try:
+                self.wfile.flush()
+            except Exception:
+                pass
         except Exception as e:
             self.send_error(502, str(e))
 
