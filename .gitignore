@@ -1,0 +1,16 @@
+# Build artifacts
+cy
+cy.exe
+*.tar.gz
+*.zip
+*.dmg
+*.pkg
+*.sha256
+*.vsix
+
+# Local cruft
+.DS_Store
+*.log
+
+__pycache__/
+*.pyc

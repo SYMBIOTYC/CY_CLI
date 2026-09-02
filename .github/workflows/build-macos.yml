@@ -68,6 +68,7 @@ jobs:
         run: cargo build --bin cy --release --target ${{ matrix.target }}
 
       - name: Package macOS .dmg
+        shell: bash
         run: |
           BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           APP_NAME="${{ matrix.app_name }}"
@@ -81,13 +82,22 @@ jobs:
 
           cp icon.icns "$APP_NAME/Contents/Resources/icon.icns"
 
+          # The launcher opens Terminal.app running the bundled cy CLI inside a
+          # real TTY (so the TUI works). The bridge converts the CLI's
+          # /v1/responses calls to the CY server's /v1/chat/completions API.
+          # CFBundleExecutable points at `launcher` so double-clicking the .app
+          # opens a terminal instead of running the raw binary with no TTY.
+          cp packaging/macos/launcher "$APP_NAME/Contents/MacOS/launcher"
+          chmod +x "$APP_NAME/Contents/MacOS/launcher"
+          cp packaging/macos/cy_bridge.py "$APP_NAME/Contents/Resources/cy_bridge.py"
+
           cat > "$APP_NAME/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>CFBundleExecutable</key>
-            <string>cy</string>
+            <string>launcher</string>
             <key>CFBundleIdentifier</key>
             <string>com.symbiotyc.cy-cli</string>
             <key>CFBundleName</key>
