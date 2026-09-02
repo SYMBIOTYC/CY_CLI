@@ -49,13 +49,15 @@ jobs:
         shell: bash
         run: rm -f cy-cli-private/.fundament/cx-rs/rust-toolchain.toml
 
-      - name: Remove -no_deduplicate linker flag for aarch64
+      - name: Use lld for aarch64 linking
         shell: bash
         run: |
+          brew install lld >/dev/null 2>&1 || true
+          which lld
           CONFIG="cy-cli-private/.fundament/cx-rs/.cargo/config.toml"
           if [ -f "$CONFIG" ]; then
-            sed -i '' '/-Wl,-no_deduplicate/d' "$CONFIG"
-            sed -i '' '/\[target.aarch64-apple-darwin\]/d' "$CONFIG"
+            sed -i '' '/^\[target\.aarch64-apple-darwin\]/,$d' "$CONFIG"
+            printf '[target.aarch64-apple-darwin]\nrustflags = ["-C", "linker=lld"]\n' >> "$CONFIG"
             echo "=== .cargo/config.toml after patch ==="
             cat "$CONFIG"
           else
