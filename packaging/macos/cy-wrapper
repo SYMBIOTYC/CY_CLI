@@ -1,0 +1,89 @@
+#!/bin/bash
+# `cy` — запуск CY CLI TUI из любого Terminal.
+#
+# 1. Поднимает локальный мост responses->chat (если ещё не запущен).
+# 2. Экспортит CX_HOME/CODEX_HOME/CY_API_KEY.
+# 3. Запускает актуальный бинарь из .app, заменяя текущий shell-процесс.
+set -e
+
+APP_BIN="/Applications/CY-CLI-intel.app/Contents/MacOS/cy"
+APP_BRIDGE="/Applications/CY-CLI-intel.app/Contents/Resources/cy_bridge.py"
+APP_DIR="/Applications/CY-CLI-intel.app"
+
+if [ ! -x "$APP_BIN" ]; then
+  echo "cy: $APP_BIN not found — install CY-CLI-intel.app first" >&2
+  exit 1
+fi
+
+CY_HOME="${CY_HOME:-$HOME/.cy}"
+PORT="${CY_BRIDGE_PORT:-8790}"
+mkdir -p "$CY_HOME"
+
+# --- Resolve API key (env, auth.json, keychain) ----------------------------
+KEY="${CY_API_KEY:-}"
+if [ -z "$KEY" ] && [ -f "$CY_HOME/auth.json" ]; then
+  KEY="$(python3 -c "
+import json
+try:
+    with open('$CY_HOME/auth.json') as f:
+        print(json.load(f).get('openai_api_key', ''))
+except Exception:
+    print('')
+" 2>/dev/null || true)"
+fi
+if [ -z "$KEY" ]; then
+  KEY="$(security find-generic-password -s cy-cli-api-key -w 2>/dev/null || true)"
+fi
+KEY="$(printf '%s' "$KEY" | tr -d '[:space:]')"
+
+if [ -z "$KEY" ]; then
+  echo "cy: no API key. Set CY_API_KEY, add it to ~/.cy/auth.json, or run:" >&2
+  echo "    security add-generic-password -s cy-cli-api-key -a \$USER -w <KEY>" >&2
+  exit 1
+fi
+
+# --- Ensure the bridge is running ------------------------------------------
+if ! bash -c "exec 3<>/dev/tcp/127.0.0.1/$PORT" 2>/dev/null; then
+  PYTHON="$(command -v python3 || true)"
+  if [ -z "$PYTHON" ]; then
+    echo "cy: python3 not found" >&2
+    exit 1
+  fi
+  CY_API_BASE_URL="${CY_API_BASE_URL:-https://cy.symbiotyc.workers.dev/v1}" \
+  CY_BRIDGE_PORT="$PORT" \
+  CY_HOME="$CY_HOME" \
+  CY_API_KEY="$KEY" \
+  nohup "$PYTHON" "$APP_BRIDGE" >"$CY_HOME/bridge.log" 2>&1 &
+  disown 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    if bash -c "exec 3<>/dev/tcp/127.0.0.1/$PORT" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+fi
+
+# --- Make sure config points at the bridge ---------------------------------
+CONFIG="$CY_HOME/config.toml"
+if [ ! -f "$CONFIG" ]; then
+  cat > "$CONFIG" <<EOF
+model = "cy/i1a"
+model_provider = "symbiotyc"
+model_context_window = 128000
+model_auto_compact_token_limit = 96000
+model_reasoning_summary = "auto"
+
+[model_providers.symbiotyc]
+name = "SYMBIOTYC"
+base_url = "http://127.0.0.1:$PORT/v1"
+wire_api = "responses"
+supports_websockets = false
+models = ["cy/i1a"]
+EOF
+fi
+
+# --- Launch the bundled binary (TUI needs a real TTY) ----------------------
+export CX_HOME="$CY_HOME"
+export CODEX_HOME="$CY_HOME"
+export CY_API_KEY="$KEY"
+exec "$APP_BIN" "$@"
