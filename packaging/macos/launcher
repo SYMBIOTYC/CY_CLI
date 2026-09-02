@@ -47,7 +47,7 @@ fi
 
 if [ -z "$KEY" ]; then
   # One-time prompt via AppleScript (hidden input, modal).
-  PROMPTED="$(osascript <<'APPLESCRIPT' 2>/dev/null || true"
+  PROMPTED="$(osascript 2>/dev/null <<'APPLESCRIPT' || true
 set theResult to display dialog "Enter your CY API key (it is stored only in your local keychain):" default answer "" with hidden answer with title "CY CLI" with icon caution
 return text returned of theResult
 APPLESCRIPT
@@ -114,6 +114,6 @@ export CY_API_KEY="$KEY"
 osascript >/dev/null 2>&1 <<APPLESCRIPT
 tell application "Terminal"
     activate
-    do script "export CX_HOME='$CY_HOME' CODEX_HOME='$CY_HOME' CY_API_KEY='$KEY'; cd '$HOME' && '$CY_CMD'"
+    do script "export CX_HOME='$CY_HOME' CODEX_HOME='$CY_HOME' CY_API_KEY='$KEY'; cd '$HOME' && '$CY_BIN'"
 end tell
 APPLESCRIPT
