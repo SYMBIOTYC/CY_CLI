@@ -18,9 +18,35 @@ permissions:
   contents: write
 
 jobs:
+  ensure-release:
+    name: Ensure GitHub release exists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+        run: |
+          # If tag looks like a plain semver (e.g. v0.2.7) and the release is
+          # missing, create it as a draft so the build jobs can attach DMGs.
+          # Branch refs (cy-v0.2.7) are not promoted to a release.
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if ! gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Creating draft release $TAG"
+              gh release create "$TAG" --draft \
+                --title "CY-CLI $TAG" \
+                --notes "Auto-generated draft. Changelog will be edited manually before publishing."
+            else
+              echo "Release $TAG already exists; skipping create"
+            fi
+          else
+            echo "Tag $TAG is not a semver release; skipping release create"
+          fi
+
   build:
     name: Build macOS ${{ matrix.target }}
     runs-on: macos-14
+    needs: ensure-release
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +106,27 @@ jobs:
 
       - name: Build release binary
         working-directory: cy-cli-private/.fundament/cx-rs
-        run: cargo build --bin cy --release --target ${{ matrix.target }}
+        run: |
+          # Cargo's incremental cache can serve a stale binary when branding
+          # or version strings change. Detect changes to files that contain
+          # the version literal or any "oi CX"/"Codex" branding and `cargo
+          # clean` the affected crate before rebuilding. This avoids the
+          # post-build patching step that we used to do by hand.
+          BRANDING_FILES=$(find cy-cli-private/.fundament/cx-rs \
+            -path '*/target' -prune -o \
+            -type f \( -name 'Cargo.toml' -o -name 'card.rs' -o -name 'tooltips.txt' -o -name 'session.rs' -o -name 'event_processor*.rs' \) -print)
+          if [ -n "$BRANDING_FILES" ]; then
+            for f in $BRANDING_FILES; do
+              if git -C cy-cli-private diff --quiet HEAD -- "$f" 2>/dev/null; then
+                :
+              else
+                echo "Branding change detected in $f; cleaning cx crate"
+                cargo clean -p cx 2>/dev/null || cargo clean
+                break
+              fi
+            done
+          fi
+          cargo build --bin cy --release --target ${{ matrix.target }}
 
       - name: Package macOS .dmg
         shell: bash
@@ -145,6 +191,59 @@ jobs:
           name: ${{ matrix.target }}-dmg
           path: ${{ matrix.artifact }}
           retention-days: 90
+
+      - name: Generate SHA-256 for the DMG
+        shell: bash
+        run: |
+          shasum -a 256 "${{ matrix.artifact }}" > "${{ matrix.artifact }}.sha256"
+          cat "${{ matrix.artifact }}.sha256"
+
+      - name: Upload SHA-256 to GitHub Release
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+        run: |
+          for i in {1..12}; do
+            gh release upload "$TAG" "${{ matrix.artifact }}.sha256" && break
+            echo "Release not ready yet, retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Post-build verification
+        if: always()
+        shell: bash
+        run: |
+          BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
+          # Verify cy_bridge.py and launcher made it into the .app.
+          APP="CY-CLI-${{ matrix.target == 'aarch64-apple-darwin' && 'arm64' || 'intel' }}.app"
+          echo "== Checking $APP/Contents/MacOS =="
+          ls -l "$APP/Contents/MacOS"
+          test -f "$APP/Contents/MacOS/launcher"  || { echo "FAIL: launcher missing"; exit 1; }
+          test -f "$APP/Contents/MacOS/cy"        || { echo "FAIL: cy missing"; exit 1; }
+          test -f "$APP/Contents/Resources/cy_bridge.py" || { echo "FAIL: cy_bridge.py missing"; exit 1; }
+          chmod +x "$APP/Contents/MacOS/launcher" "$APP/Contents/MacOS/cy"
+          echo "== Branding check (must be empty) =="
+          # All of these should produce zero hits in a clean build.
+          for needle in 'oi CX' 'Codex CLI' 'chatgpt.com/cx?app-landing-page=true' 'CY-CLI 0.0.0'; do
+            if strings "$BIN" | grep -q -F "$needle"; then
+              echo "FAIL: branding leak in binary: $needle"
+              strings "$BIN" | grep -F "$needle" | head -3
+              exit 1
+            fi
+            if grep -q -F "$needle" "$APP/Contents/Resources/cy_bridge.py" 2>/dev/null; then
+              echo "FAIL: branding leak in cy_bridge.py: $needle"
+              exit 1
+            fi
+          done
+          # Version literal must match 0.2.7 (workspace version).
+          if ! strings "$BIN" | grep -q -E 'CY[- ]CLI[ ]?v?0\.2\.7|Cli0\.2\.7|cy-cli[ ]?0\.2\.7'; then
+            echo "FAIL: version 0.2.7 not found in binary"
+            strings "$BIN" | grep -E '0\.[0-9]+\.[0-9]+' | sort -u | head -10
+            exit 1
+          fi
+          echo "== Branding clean =="
 
       - name: Upload to GitHub Release
         if: always()

@@ -25,17 +25,34 @@ order of preference:
 """
 import http.server
 import urllib.request
+import urllib.error
 import json
 import time
 import hashlib
 import base64
 import os
+import sys
 import subprocess
 import glob
+import logging
+import concurrent.futures
 
 CY_BASE = os.environ.get("CY_API_BASE_URL", "https://cy.symbiotyc.workers.dev/v1")
 PORT = int(os.environ.get("CY_BRIDGE_PORT", "8790"))
 CY_HOME = os.environ.get("CY_HOME", os.path.expanduser("~/.cy"))
+# Workspace root for shell_exec sandboxing. If unset, shell_exec rejects any
+# command whose resolved cwd or target path escapes the cwd at request time.
+# Set CY_BRIDGE_ROOT=<path> to lift the sandbox (read-only, for trusted jobs).
+CY_BRIDGE_ROOT = os.environ.get("CY_BRIDGE_ROOT", "").strip()
+
+# ---- logging --------------------------------------------------------------
+log = logging.getLogger("cy-bridge")
+if not log.handlers:
+    h = logging.StreamHandler(stream=sys.stderr)
+    h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
+                                     datefmt="%H:%M:%S"))
+    log.addHandler(h)
+log.setLevel(os.environ.get("CY_BRIDGE_LOG", "INFO").upper())
 
 _PLACEHOLDERS = {"", "cy-local-bridge", "local-bridge", "Bearer"}
 
@@ -165,12 +182,45 @@ def _resolve_key(_incoming):
 
 # ---------- local tool implementations --------------------------------------
 
+def _sandbox_check(path):
+    """Return True if `path` is inside the workspace root (or sandboxing is off).
+
+    If CY_BRIDGE_ROOT is unset, only paths inside the current working directory
+    are allowed. Absolute paths under CY_HOME (auth.json) are always allowed so
+    the bridge can read the API key. Setting CY_BRIDGE_ROOT to a directory lifts
+    the sandbox and allows that whole tree; this is intended for trusted batch
+    jobs, not interactive use.
+    """
+    if not path:
+        return True
+    try:
+        real = os.path.realpath(path)
+    except Exception:
+        return False
+    if real.startswith(os.path.realpath(CY_HOME)):
+        return True
+    if CY_BRIDGE_ROOT:
+        try:
+            if real.startswith(os.path.realpath(CY_BRIDGE_ROOT)):
+                return True
+        except Exception:
+            pass
+    try:
+        cwd = os.path.realpath(os.getcwd())
+        common = os.path.commonpath([real, cwd])
+    except Exception:
+        return False
+    return common == cwd
+
+
 def _tool_read_file(args):
     path = args.get("path", "")
     if not path:
         return {"ok": False, "error": "path is required"}
     if not os.path.isabs(path):
         path = os.path.abspath(path)
+    if not _sandbox_check(path):
+        return {"ok": False, "error": f"sandbox: path outside workspace: {path}"}
     max_bytes = int(args.get("max_bytes") or 65536)
     try:
         with open(path, "rb") as fh:
@@ -196,6 +246,8 @@ def _tool_write_file(args):
         return {"ok": False, "error": "path is required"}
     if not os.path.isabs(path):
         path = os.path.abspath(path)
+    if not _sandbox_check(path):
+        return {"ok": False, "error": f"sandbox: path outside workspace: {path}"}
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -211,6 +263,8 @@ def _tool_list_dir(args):
     path = args.get("path") or "."
     if not os.path.isabs(path):
         path = os.path.abspath(path)
+    if not _sandbox_check(path):
+        return {"ok": False, "error": f"sandbox: path outside workspace: {path}"}
     if not os.path.isdir(path):
         return {"ok": False, "error": f"not a directory: {path}"}
     entries = []
@@ -235,6 +289,11 @@ def _tool_shell_exec(args):
     timeout = int(args.get("timeout") or 30)
     if timeout > 120:
         timeout = 120
+    # Default cwd = current process cwd. Override with `cwd` argument, but
+    # refuse to leave the workspace unless CY_BRIDGE_ROOT is set.
+    cwd = args.get("cwd") or os.getcwd()
+    if not _sandbox_check(cwd):
+        return {"ok": False, "error": f"sandbox: cwd outside workspace: {cwd}"}
     try:
         proc = subprocess.run(
             cmd,
@@ -242,6 +301,7 @@ def _tool_shell_exec(args):
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=cwd,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"timeout after {timeout}s"}
@@ -253,7 +313,7 @@ def _tool_shell_exec(args):
         out = out[:32000] + "\n... [truncated]"
     if len(err) > 16000:
         err = err[:16000] + "\n... [truncated]"
-    return {"ok": True, "exit_code": proc.returncode, "stdout": out, "stderr": err}
+    return {"ok": True, "exit_code": proc.returncode, "stdout": out, "stderr": err, "cwd": cwd}
 
 
 def _tool_glob_files(args):
@@ -296,21 +356,56 @@ def _run_tool(name, arguments_json):
 
 # ---------- chat-completions <-> upstream -----------------------------------
 
+# Retry policy: 3 attempts, exponential backoff (0.5s, 1.0s, 2.0s).
+_UPSTREAM_ATTEMPTS = 3
+_UPSTREAM_BACKOFF = (0.5, 1.0, 2.0)
+# HTTP statuses that are worth retrying (transient). 4xx other than 408/429 is
+# the caller's fault and is not retried.
+_RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
+
+
 def _post_chat(model, messages, tools=None):
+    """POST a chat completion to the upstream. Retries transient errors.
+
+    Returns parsed JSON on success, raises the last exception on terminal
+    failure so the caller can surface the error in the SSE response.
+    """
     body = {"model": model, "messages": messages, "stream": False}
     if tools:
         body["tools"] = tools
     data = json.dumps(body).encode()
-    req = urllib.request.Request(
-        f"{CY_BASE}/chat/completions",
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "cy-bridge/2.0",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read())
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "cy-bridge/2.1",
+    }
+
+    last_err = None
+    for attempt in range(1, _UPSTREAM_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            f"{CY_BASE}/chat/completions", data=data, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in _RETRYABLE_HTTP and attempt < _UPSTREAM_ATTEMPTS:
+                wait = _UPSTREAM_BACKOFF[attempt - 1]
+                log.warning("upstream HTTP %s (attempt %d/%d), retry in %.1fs",
+                            e.code, attempt, _UPSTREAM_ATTEMPTS, wait)
+                time.sleep(wait)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_err = e
+            if attempt < _UPSTREAM_ATTEMPTS:
+                wait = _UPSTREAM_BACKOFF[attempt - 1]
+                log.warning("upstream %s (attempt %d/%d), retry in %.1fs",
+                            type(e).__name__, attempt, _UPSTREAM_ATTEMPTS, wait)
+                time.sleep(wait)
+                continue
+            raise
+    # Unreachable: the loop either returns or raises, but keep last_err live.
+    raise last_err  # pragma: no cover
 
 
 def _extract_assistant(chat_resp):
@@ -449,6 +544,9 @@ class H(http.server.BaseHTTPRequestHandler):
             )
             return
 
+        t_start = time.time()
+        log.info("request model=%s upstream=%s", req.get("model", "cy/i1a"), CY_BASE)
+
         model = req.get("model") or "cy/i1a"
         messages = _responses_to_messages(req)
         max_tool_rounds = 6
@@ -487,9 +585,31 @@ class H(http.server.BaseHTTPRequestHandler):
                     final_text = text
                     break
 
-                # Tool-use round: execute each tool, append tool messages, loop.
-                for tc in tool_calls:
-                    tool_result = _run_tool(tc["name"], tc["arguments"])
+                # Tool-use round: execute each tool in parallel and append the
+                # results in the original order. Capped at 4 workers so a model
+                # that requests many shell_execs at once cannot fork-bomb the
+                # box.
+                if len(tool_calls) == 1:
+                    ordered = [_run_tool(tool_calls[0]["name"], tool_calls[0]["arguments"])]
+                else:
+                    with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=min(4, len(tool_calls))) as ex:
+                        futures = {
+                            ex.submit(_run_tool, tc["name"], tc["arguments"]): tc
+                            for tc in tool_calls
+                        }
+                        results_by_id = {}
+                        for fut, tc in futures.items():
+                            try:
+                                results_by_id[tc["id"]] = fut.result()
+                            except Exception as e:
+                                results_by_id[tc["id"]] = {
+                                    "ok": False,
+                                    "error": f"{type(e).__name__}: {e}",
+                                }
+                    ordered = [results_by_id[tc["id"]] for tc in tool_calls]
+
+                for tc, tool_result in zip(tool_calls, ordered):
                     output_str = json.dumps(tool_result, ensure_ascii=False)
                     messages.append({
                         "role": "tool",
@@ -501,7 +621,21 @@ class H(http.server.BaseHTTPRequestHandler):
                     f"CY: tool loop did not converge after {max_tool_rounds} rounds."
                 )
         except Exception as e:
+            log.exception("bridge error")
             final_text = f"CY: bridge error: {type(e).__name__}: {e}"
+
+        # Log final token usage (if the upstream returned a `usage` block).
+        # This makes per-request cost visible in bridge stderr logs.
+        if final_usage:
+            log.info("usage prompt=%s completion=%s total=%s (model=%s, %.2fs)",
+                     final_usage.get("prompt_tokens", "?"),
+                     final_usage.get("completion_tokens", "?"),
+                     final_usage.get("total_tokens", "?"),
+                     upstream_model,
+                     time.time() - t_start)
+        else:
+            log.info("no usage block returned (model=%s, %.2fs)",
+                     upstream_model, time.time() - t_start)
 
         # Stream a single Responses SSE response containing only the final text.
         self._open_sse()
