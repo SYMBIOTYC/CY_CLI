@@ -114,12 +114,12 @@ jobs:
           # the version literal or any "oi CX"/"Codex" branding and `cargo
           # clean` the affected crate before rebuilding. This avoids the
           # post-build patching step that we used to do by hand.
-          BRANDING_FILES=$(find cy-cli-private/.fundament/cx-rs \
+          BRANDING_FILES=$(find . \
             -path '*/target' -prune -o \
             -type f \( -name 'Cargo.toml' -o -name 'card.rs' -o -name 'tooltips.txt' -o -name 'session.rs' -o -name 'event_processor*.rs' \) -print)
           if [ -n "$BRANDING_FILES" ]; then
             for f in $BRANDING_FILES; do
-              if git -C cy-cli-private diff --quiet HEAD -- "$f" 2>/dev/null; then
+              if git -C ../.. diff --quiet HEAD -- "$f" 2>/dev/null; then
                 :
               else
                 echo "Branding change detected in $f; cleaning cx crate"
@@ -216,12 +216,15 @@ jobs:
       - name: Post-build verification
         if: always()
         shell: bash
+        working-directory: .
         run: |
           BIN="cy-cli-private/.fundament/cx-rs/target/${{ matrix.target }}/release/cy"
           # Verify cy_bridge.py and launcher made it into the .app.
           APP="CY-CLI-${{ matrix.target == 'aarch64-apple-darwin' && 'arm64' || 'intel' }}.app"
+          echo "== PWD =="
+          pwd
           echo "== Checking $APP/Contents/MacOS =="
-          ls -l "$APP/Contents/MacOS"
+          ls -l "$APP/Contents/MacOS" 2>&1 || { echo "FAIL: $APP/Contents/MacOS missing"; exit 1; }
           test -f "$APP/Contents/MacOS/launcher"  || { echo "FAIL: launcher missing"; exit 1; }
           test -f "$APP/Contents/MacOS/cy"        || { echo "FAIL: cy missing"; exit 1; }
           test -f "$APP/Contents/Resources/cy_bridge.py" || { echo "FAIL: cy_bridge.py missing"; exit 1; }
