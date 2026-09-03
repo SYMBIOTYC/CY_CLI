@@ -229,12 +229,17 @@ jobs:
           test -f "$APP/Contents/MacOS/cy"        || { echo "FAIL: cy missing"; exit 1; }
           test -f "$APP/Contents/Resources/cy_bridge.py" || { echo "FAIL: cy_bridge.py missing"; exit 1; }
           chmod +x "$APP/Contents/MacOS/launcher" "$APP/Contents/MacOS/cy"
+          # Dump strings once to a temp file so the broken-pipe dance between
+          # `strings | grep -q` does not trip the runner's `set -o pipefail`.
+          STRINGS_FILE="$(mktemp -t cystrings.XXXXXX)"
+          strings "$BIN" > "$STRINGS_FILE" 2>/dev/null || true
+          ls -lh "$STRINGS_FILE"
           echo "== Branding check (must be empty) =="
           # All of these should produce zero hits in a clean build.
           for needle in 'oi CX' 'Codex CLI' 'chatgpt.com/cx?app-landing-page=true' 'CY-CLI 0.0.0'; do
-            if strings "$BIN" | grep -q -F "$needle"; then
+            if grep -q -F "$needle" "$STRINGS_FILE"; then
               echo "FAIL: branding leak in binary: $needle"
-              strings "$BIN" | grep -F "$needle" | head -3
+              grep -F "$needle" "$STRINGS_FILE" | head -3
               exit 1
             fi
             if grep -q -F "$needle" "$APP/Contents/Resources/cy_bridge.py" 2>/dev/null; then
@@ -244,18 +249,17 @@ jobs:
           done
           # Version literal must match 0.2.7 (workspace version).
           # CX_CLI_VERSION = env!("CARGO_PKG_VERSION") = "0.2.7".
-          # The TUI renders this as "(v0.2.7)" via format!.
-          if ! strings "$BIN" | grep -q -E '0\.2\.7'; then
+          if ! grep -q -E '0\.2\.7' "$STRINGS_FILE"; then
             echo "FAIL: version 0.2.7 not found in binary"
-            strings "$BIN" | grep -E '0\.[0-9]+\.[0-9]+' | sort -u | head -10
+            grep -E '0\.[0-9]+\.[0-9]+' "$STRINGS_FILE" | sort -u | head -10
             exit 1
           fi
-          # Make sure the previous version 0.2.6 is gone.
-          if strings "$BIN" | grep -q -E '0\.2\.6'; then
+          if grep -q -E '0\.2\.6' "$STRINGS_FILE"; then
             echo "FAIL: previous version 0.2.6 still in binary"
-            strings "$BIN" | grep -E '0\.2\.6' | sort -u | head -10
+            grep -E '0\.2\.6' "$STRINGS_FILE" | sort -u | head -10
             exit 1
           fi
+          rm -f "$STRINGS_FILE"
           echo "== Branding clean =="
 
       - name: Upload to GitHub Release
