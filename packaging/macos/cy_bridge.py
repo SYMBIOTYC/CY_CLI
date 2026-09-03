@@ -541,4 +541,5 @@ class H(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    http.server.HTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    socketserver = http.server.ThreadingHTTPServer if hasattr(http.server, "ThreadingHTTPServer") else http.server.HTTPServer
+    socketserver(("127.0.0.1", PORT), H).serve_forever()
