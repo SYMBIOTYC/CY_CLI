@@ -243,9 +243,17 @@ jobs:
             fi
           done
           # Version literal must match 0.2.7 (workspace version).
-          if ! strings "$BIN" | grep -q -E 'CY[- ]CLI[ ]?v?0\.2\.7|Cli0\.2\.7|cy-cli[ ]?0\.2\.7'; then
+          # CX_CLI_VERSION = env!("CARGO_PKG_VERSION") = "0.2.7".
+          # The TUI renders this as "(v0.2.7)" via format!.
+          if ! strings "$BIN" | grep -q -E '0\.2\.7'; then
             echo "FAIL: version 0.2.7 not found in binary"
             strings "$BIN" | grep -E '0\.[0-9]+\.[0-9]+' | sort -u | head -10
+            exit 1
+          fi
+          # Make sure the previous version 0.2.6 is gone.
+          if strings "$BIN" | grep -q -E '0\.2\.6'; then
+            echo "FAIL: previous version 0.2.6 still in binary"
+            strings "$BIN" | grep -E '0\.2\.6' | sort -u | head -10
             exit 1
           fi
           echo "== Branding clean =="
