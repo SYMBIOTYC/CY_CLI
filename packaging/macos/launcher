@@ -2,13 +2,15 @@
 # CY-CLI macOS app launcher.
 #
 # The app bundle's Info.plist points CFBundleExecutable at this script. It:
-#   1. Resolves a CY API key (env, keychain, or one-time prompt) and writes it
+#   1. Resolves a CY API key (env, keychain, ~/.cy/auth.json) and writes it
 #      to ~/.cy/auth.json so the bundled `cy` CLI can authenticate.
 #   2. Starts the local responses->chat bridge (if not already running) and
 #      passes the key into its environment.
 #   3. Writes a default ~/.cy config pointing at the bridge.
 #   4. Opens Terminal.app running the bundled `cy` binary (real TTY so the TUI
-#      works), with CY_API_KEY exported in that shell.
+#      works), with CY_API_KEY exported in that shell. The first screen of
+#      the spawned Terminal shows a big pink CY ASCII-art logo so users
+#      know the brand before the TUI takes over.
 set -e
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +24,7 @@ mkdir -p "$CY_HOME"
 AUTH_FILE="$CY_HOME/auth.json"
 CONFIG="$CY_HOME/config.toml"
 
-# --- Resolve the API key (env first, then auth.json, then prompt) ----------
+# --- Resolve the API key (env, auth.json, keychain) ------------------------
 KEY="${CY_API_KEY:-}"
 if [ -z "$KEY" ] && [ -f "$AUTH_FILE" ]; then
   KEY="$(python3 -c "
@@ -46,20 +48,25 @@ if [ -z "$KEY" ]; then
 fi
 
 if [ -z "$KEY" ]; then
-  # One-time prompt via AppleScript (hidden input, modal).
-  PROMPTED="$(osascript 2>/dev/null <<'APPLESCRIPT' || true
-set theResult to display dialog "Enter your CY API key (it is stored only in your local keychain):" default answer "" with hidden answer with title "CY CLI" with icon caution
-return text returned of theResult
-APPLESCRIPT
-)"
-  KEY="$(printf '%s' "$PROMPTED" | tr -d '[:space:]')"
-  if [ -z "$KEY" ]; then
-    osascript -e 'display alert "CY CLI" message "No API key provided. Set CY_API_KEY or add your key to ~/.cy/auth.json and try again." as critical' >/dev/null 2>&1 || true
-    exit 1
-  fi
-  # Save to keychain (kSecGenericPassword) so we do not have to ask again.
-  security delete-generic-password -s cy-cli-api-key >/dev/null 2>&1 || true
-  security add-generic-password -s cy-cli-api-key -a "$USER" -w "$KEY" >/dev/null 2>&1 || true
+  # No key anywhere. Surface a clear, branded error in Terminal and bail
+  # out so the TUI does not show its own (less friendly) missing-key error.
+  cat <<'NO_KEY' >&2
+
+  \033[1;35m  ██████╗██╗   ██╗
+  ██╔════╝╚██╗ ██╔╝
+  ██║      ╚████╔╝
+  ██║       ╚██╔╝
+  ╚██████╗   ██║
+   ╚═════╝   ╚═╝\033[0m
+
+  \033[1;31mNo CY API key found.\033[0m
+  Set one of:
+    - \033[1;36mexport CY_API_KEY=...\033[0m   in your shell rc file
+    - \033[1;36m~/.cy/auth.json\033[0m          with {\"openai_api_key\": \"...\"}
+    - \033[1;36mKeychain\033[0m                 via \033[1;36msecurity add-generic-password -s cy-cli-api-key -a $USER -w <key>\033[0m
+
+NO_KEY
+  exit 1
 fi
 
 # --- Write auth.json (overwrite empty one) ----------------------------------
@@ -87,6 +94,24 @@ if ! bash -c "exec 3<>/dev/tcp/127.0.0.1/$PORT" 2>/dev/null; then
   done
 fi
 
+# --- Seed SYMBIOTYC-branded syntax themes on first launch ------------------
+# The 7 .tmTheme files ship inside Contents/Resources/themes/ in the .app
+# bundle. We copy them into ~/.cy/themes/ if the user has never had any of
+# our themes installed before. Re-running the launcher is safe: existing
+# files are never overwritten (the user might have edited one).
+THEMES_SRC="$APP_DIR/Resources/themes"
+THEMES_DST="$CY_HOME/themes"
+if [ -d "$THEMES_SRC" ]; then
+  mkdir -p "$THEMES_DST"
+  for t in "$THEMES_SRC"/*.tmTheme; do
+    [ -f "$t" ] || continue
+    name="$(basename "$t")"
+    if [ ! -f "$THEMES_DST/$name" ]; then
+      cp "$t" "$THEMES_DST/$name"
+    fi
+  done
+fi
+
 # --- Default config (only written on first launch so user edits survive) ---
 if [ ! -f "$CONFIG" ]; then
   cat > "$CONFIG" <<EOF
@@ -106,14 +131,43 @@ models = ["cy/i1a"]
 EOF
 fi
 
-# --- Open Terminal with the CLI and the key exported -----------------------
+# --- Build the first-screen splash (big pink CY ASCII art) -----------------
+# We build the splash with $'...' (ANSI-C quoting) so the escape character
+# is the literal 0x1B byte — Terminal.app will then render the colours.
+#   1;35 = bold magenta (pink), 0 = reset, 1;36 = bold cyan, 2;37 = dim grey.
+ESC=$'\033'
+PINK="${ESC}[1;35m"
+CYAN="${ESC}[1;36m"
+DIM="${ESC}[2;37m"
+RESET="${ESC}[0m"
+
+SPLASH_FILE="$CY_HOME/.splash.ansi"
+cat > "$SPLASH_FILE" <<SPLASH_EOF
+${PINK}
+  ██████╗██╗   ██╗
+ ██╔════╝╚██╗ ██╔╝
+ ██║      ╚████╔╝
+ ██║       ╚██╔╝
+ ╚██████╗   ██║
+  ╚═════╝   ╚═╝${RESET}
+
+ ${PINK}CY${RESET} ${DIM}— Symbiotic Coding Assistant${RESET}
+ ${DIM}Loading TUI...${RESET}
+SPLASH_EOF
+
+# --- Open Terminal with the splash, then the CLI ---------------------------
 export CX_HOME="$CY_HOME"
 export CODEX_HOME="$CY_HOME"
 export CY_API_KEY="$KEY"
 
+# AppleScript "do script" runs the command in a new Terminal tab. We hide
+# the shell prompt while the splash + cy start so the user only sees the
+# pink CY art (not zsh's "Last login:" banner or its default PS1). After
+# the cy TUI exits we restore the user's original prompt and clear the
+# splash file.
 osascript >/dev/null 2>&1 <<APPLESCRIPT
 tell application "Terminal"
     activate
-    do script "export CX_HOME='$CY_HOME' CODEX_HOME='$CY_HOME' CY_API_KEY='$KEY'; cd '$HOME' && '$CY_BIN'"
+    do script "export CX_HOME='$CY_HOME' CODEX_HOME='$CY_HOME' CY_API_KEY='$KEY'; export PS1='$ '; export PROMPT_EOL=''; clear; cat '$SPLASH_FILE'; cd '$HOME' && '$CY_BIN'; rm -f '$SPLASH_FILE'"
 end tell
 APPLESCRIPT

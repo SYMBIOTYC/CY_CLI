@@ -154,6 +154,14 @@ jobs:
           chmod +x "$APP_NAME/Contents/MacOS/launcher"
           cp packaging/macos/cy_bridge.py "$APP_NAME/Contents/Resources/cy_bridge.py"
 
+          # Bundle the 7 SYMBIOTYC-branded syntax themes. The launcher copies
+          # them into ~/.cy/themes/ on first run so `/theme` shows them with a
+          # ★ prefix and the picker defaults to `cy-prime` on dark terminals.
+          mkdir -p "$APP_NAME/Contents/Resources/themes"
+          cp packaging/themes/*.tmTheme "$APP_NAME/Contents/Resources/themes/"
+          echo "== Bundled themes =="
+          ls "$APP_NAME/Contents/Resources/themes"
+
           cat > "$APP_NAME/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -231,6 +239,15 @@ jobs:
           test -f "$APP/Contents/MacOS/launcher"  || { echo "FAIL: launcher missing"; exit 1; }
           test -f "$APP/Contents/MacOS/cy"        || { echo "FAIL: cy missing"; exit 1; }
           test -f "$APP/Contents/Resources/cy_bridge.py" || { echo "FAIL: cy_bridge.py missing"; exit 1; }
+          test -d "$APP/Contents/Resources/themes" || { echo "FAIL: themes dir missing"; exit 1; }
+          expected_themes=(
+            cy-prime.tmTheme neon-aurora.tmTheme quantum-field.tmTheme
+            void-sync.tmTheme carbon-core.tmTheme cipher-lattice.tmTheme
+            photon-blade.tmTheme solar-cortex.tmTheme
+          )
+          for t in "${expected_themes[@]}"; do
+            test -f "$APP/Contents/Resources/themes/$t" || { echo "FAIL: theme $t missing"; exit 1; }
+          done
           chmod +x "$APP/Contents/MacOS/launcher" "$APP/Contents/MacOS/cy"
           # Dump strings once to a temp file so the broken-pipe dance between
           # `strings | grep -q` does not trip the runner's `set -o pipefail`.

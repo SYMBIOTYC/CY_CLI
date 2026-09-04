@@ -489,6 +489,9 @@ def _responses_to_messages(req):
 # ---------- main request handler --------------------------------------------
 
 class H(http.server.BaseHTTPRequestHandler):
+    # CY CLI speaks HTTP/1.1, not the BaseHTTP default of HTTP/1.0.
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, *a):
         pass
 
