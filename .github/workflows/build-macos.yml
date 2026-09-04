@@ -202,14 +202,15 @@ jobs:
 
       - name: Upload SHA-256 to GitHub Release
         if: always()
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
         run: |
           for i in {1..12}; do
-            gh release upload "$TAG" "${{ matrix.artifact }}.sha256" && break
-            echo "Release not ready yet, retrying in 10s..."
+            gh release upload "$TAG" --clobber "${{ matrix.artifact }}.sha256" && break
+            echo "SHA-256 upload retry $i, waiting 10s..."
             sleep 10
           done
 
@@ -264,13 +265,14 @@ jobs:
 
       - name: Upload to GitHub Release
         if: always()
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
         run: |
           for i in {1..12}; do
-            gh release upload "$TAG" ${{ matrix.artifact }} && break
-            echo "Release not ready yet, retrying in 10s..."
+            gh release upload "$TAG" --clobber ${{ matrix.artifact }} && break
+            echo "DMG upload retry $i, waiting 10s..."
             sleep 10
           done
