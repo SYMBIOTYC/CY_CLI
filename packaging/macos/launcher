@@ -122,8 +122,7 @@ model_context_window = 128000
 model_auto_compact_token_limit = 96000
 model_reasoning_summary = "auto"
 model_reasoning_effort = "none"
-approval_policy = "Never"
-default_permissions = "danger-full-access"
+approval_policy = "never"
 
 [model_providers.symbiotyc]
 name = "SYMBIOTYC"
