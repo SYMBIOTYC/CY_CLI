@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CY-CLI local bridge.
+"""CY CLI local bridge.
 
 Converts the CY CLI's Responses API calls (/v1/responses) into Chat Completions
 requests for the CY server (cy.symbiotyc.workers.dev/v1), which only exposes
@@ -77,11 +77,50 @@ SYSTEM_PROMPT = (
     "(10) When you need a file, shell result, or web page, call the matching tool; do not guess. "
     "(11) Cite paths verbatim. "
     "(12) For yes/no questions, answer yes or no first, then justify in one sentence. "
+    "(13) BEFORE every tool call, write plain text: 'I\'ll run: [command]'. AFTER, write: 'Result: [output]'. "
+    "(14) When answering a NEW question, ONLY answer that question. Do NOT repeat, re-answer, or re-summarize previous questions or their answers. Previous context is provided for reference only — answer ONLY what was JUST asked."
     "TOOLS YOU HAVE: read_file, write_file, list_dir, shell_exec, glob_files, "
     "browser_open (open URL in system browser), browser_fetch (fetch URL content via curl), "
     "browser_screenshot (capture screen region). "
     "USE THEM. You are NOT limited. You have GOD MODE access to everything."
 )
+
+DEVELOPER_INFO = {
+    "creators": ["jullyfarris-star", "vladleopold"],
+}
+
+_CREATOR_KEYWORDS = (
+    "хто тебе написав", "хто написав тебе", "хто розробник", "хто творець",
+    "кто создатель", "кто разработчик", "кто написал", "who created",
+    "who built", "who developed", "creator", "developer", "разработчик",
+    "написав", "створен", "created by", "made by", "автор",
+)
+
+def _asks_about_creators(text):
+    if not text or not isinstance(text, str):
+        return False
+    lower = text.lower()
+    return any(kw in lower for kw in _CREATOR_KEYWORDS)
+
+_creator_question_count = 0
+_CREATOR_REVEAL_THRESHOLD = 3
+
+def _maybe_reveal_creators(messages):
+    global _creator_question_count
+    if not messages:
+        return
+    last_user = None
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            last_user = msg.get("content", "")
+            break
+    if last_user and _asks_about_creators(last_user):
+        _creator_question_count += 1
+        if _creator_question_count >= _CREATOR_REVEAL_THRESHOLD:
+            messages.append({
+                "role": "developer",
+                "content": f"CY was created by GitHub users: {', '.join(DEVELOPER_INFO['creators'])}.",
+            })
 
 # Tool catalog exposed to the model. Schema mirrors OpenAI's `tools` shape so
 # the upstream can re-emit them on the wire if needed.
@@ -692,6 +731,7 @@ def _responses_to_messages(req):
     inp = req.get("input", [])
     if isinstance(inp, str):
         messages.append({"role": "user", "content": inp})
+        _maybe_reveal_creators(messages)
         return messages
     for item in inp or []:
         if not isinstance(item, dict):
@@ -730,6 +770,7 @@ def _responses_to_messages(req):
             })
         elif "role" in item and "content" in item:
             messages.append({"role": item["role"], "content": str(item["content"])})
+    _maybe_reveal_creators(messages)
     return messages
 
 
@@ -855,6 +896,22 @@ class H(http.server.BaseHTTPRequestHandler):
             )
             self._sse_simple(phrase)
             return
+
+        self._open_sse()
+        rid = f"resp_{int(time.time()*1000)}"
+        msg_id = f"msg_{rid}"
+        for ev_name, ev_payload in [
+            ("response.created", {"type": "response.created", "response": {"id": rid, "object": "response", "created_at": int(time.time()), "model": "cy/i1a", "status": "in_progress"}}),
+            ("response.in_progress", {"type": "response.in_progress", "response": {"id": rid, "object": "response", "created_at": int(time.time()), "model": "cy/i1a", "status": "in_progress"}}),
+            ("response.output_item.added", {"type": "response.output_item.added", "output_index": 0, "item": {"id": msg_id, "type": "message", "role": "assistant", "status": "in_progress", "content": []}}),
+            ("response.content_part.added", {"type": "response.content_part.added", "item_id": msg_id, "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}}),
+        ]:
+            self.wfile.write(f"event: {ev_name}\ndata: {json.dumps(ev_payload)}\n\n".encode())
+            self.wfile.flush()
+
+        def _stream(text):
+            self.wfile.write(f"event: response.output_text.delta\ndata: {json.dumps({'type':'response.output_text.delta','item_id':msg_id,'output_index':0,'content_index':0,'delta':text})}\n\n".encode())
+            self.wfile.flush()
 
         t_start = time.time()
         log.info("request model=%s upstream=%s", req.get("model", "cy/i1a"), CY_BASE)
@@ -999,6 +1056,9 @@ class H(http.server.BaseHTTPRequestHandler):
                         "tool_call_id": tc["id"],
                         "content": output_str,
                     })
+                    _stream(f"\n🔧 {tc['name']}: {tc['arguments']}\n")
+                    _display = output_str[:500] + f"... [{len(output_str)} chars total]" if len(output_str) > 500 else output_str
+                    _stream(f"Result: {_display}\n")
                 # Prune old tool messages to bound context.
                 if len(messages) > 20:
                     for m in messages[1:-10]:
@@ -1051,27 +1111,10 @@ class H(http.server.BaseHTTPRequestHandler):
             log.info("no usage block returned (model=%s, %.2fs)",
                      upstream_model, time.time() - t_start)
 
-        # Stream a single Responses SSE response containing only the final text.
-        self._open_sse()
-        rid = f"resp_{int(time.time()*1000)}"
-        msg_id = f"msg_{rid}"
+        # Stream model response via already-open SSE
         try:
-            self.wfile.write(f"event: response.created\ndata: {json.dumps({'type':'response.created','response':{'id':rid,'object':'response','created_at':int(time.time()),'model':upstream_model,'status':'in_progress'}})}\n\n".encode())
-            self.wfile.flush()
-            self.wfile.write(f"event: response.in_progress\ndata: {json.dumps({'type':'response.in_progress','response':{'id':rid,'object':'response','created_at':int(time.time()),'model':upstream_model,'status':'in_progress'}})}\n\n".encode())
-            self.wfile.flush()
-            self.wfile.write(f"event: response.output_item.added\ndata: {json.dumps({'type':'response.output_item.added','output_index':0,'item':{'id':msg_id,'type':'message','role':'assistant','status':'in_progress','content':[]}})}\n\n".encode())
-            self.wfile.flush()
-            self.wfile.write(f"event: response.content_part.added\ndata: {json.dumps({'type':'response.content_part.added','item_id':msg_id,'output_index':0,'content_index':0,'part':{'type':'output_text','text':'','annotations':[]}})}\n\n".encode())
-            self.wfile.flush()
-            chunk_size = 64
-            for i in range(0, len(final_text), chunk_size):
-                chunk = final_text[i:i + chunk_size]
-                self.wfile.write(f"event: response.output_text.delta\ndata: {json.dumps({'type':'response.output_text.delta','item_id':msg_id,'output_index':0,'content_index':0,'delta':chunk})}\n\n".encode())
-                self.wfile.flush()
+            _stream(final_text)
             self.wfile.write(f"event: response.output_text.done\ndata: {json.dumps({'type':'response.output_text.done','item_id':msg_id,'output_index':0,'content_index':0,'text':final_text})}\n\n".encode())
-            self.wfile.flush()
-            self.wfile.write(f"event: response.content_part.done\ndata: {json.dumps({'type':'response.content_part.done','item_id':msg_id,'output_index':0,'content_index':0,'part':{'type':'output_text','text':final_text,'annotations':[]}})}\n\n".encode())
             self.wfile.flush()
             self.wfile.write(f"event: response.output_item.done\ndata: {json.dumps({'type':'response.output_item.done','output_index':0,'item':{'id':msg_id,'type':'message','role':'assistant','status':'completed','content':[{'type':'output_text','text':final_text,'annotations':[]}]}})}\n\n".encode())
             self.wfile.flush()

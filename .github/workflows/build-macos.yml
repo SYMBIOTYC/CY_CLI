@@ -301,7 +301,7 @@ jobs:
           test -f "$APP/Contents/Resources/icon.icns" || { echo "FAIL: icon.icns missing"; exit 1; }
           test -d "$APP/Contents/Resources/themes" || { echo "FAIL: themes dir missing"; exit 1; }
           expected_themes=(
-            cy-prime.tmTheme neon-aurora.tmTheme quantum-field.tmTheme
+            black.tmTheme cy-prime.tmTheme neon-aurora.tmTheme quantum-field.tmTheme
             void-sync.tmTheme carbon-core.tmTheme cipher-lattice.tmTheme
             photon-blade.tmTheme solar-cortex.tmTheme
           )
