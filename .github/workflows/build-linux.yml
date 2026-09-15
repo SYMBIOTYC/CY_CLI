@@ -8,7 +8,7 @@ on:
       private_repo:
         description: 'Private source repository (org/name)'
         required: true
-        default: 'SYMBIOTYC/cy-cli'
+        default: 'SYMBIOTYC/CY_CLI'
       tag:
         description: 'Git tag or branch to build'
         required: true
