@@ -50,8 +50,8 @@ jobs:
       - name: Checkout private source code
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.inputs.private_repo || github.event.client_payload.private_repo }}
-          ref: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+          repository: SYMBIOTYC/cy-cli
+          ref: main
           path: cy-cli-private
 
       - name: Checkout release repo assets
