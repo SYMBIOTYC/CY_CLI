@@ -915,6 +915,7 @@ class H(http.server.BaseHTTPRequestHandler):
 
         t_start = time.time()
         log.info("request model=%s upstream=%s", req.get("model", "cy/i1a"), CY_BASE)
+        _tool_log = []
 
         model = req.get("model") or "cy/i1a"
         messages = _responses_to_messages(req)
@@ -1056,8 +1057,10 @@ class H(http.server.BaseHTTPRequestHandler):
                         "tool_call_id": tc["id"],
                         "content": output_str,
                     })
-                    _stream(f"\n🔧 {tc['name']}: {tc['arguments']}\n")
+                    _tool_log.append(f"\n🔧 {tc['name']}: {tc['arguments']}")
                     _display = output_str[:500] + f"... [{len(output_str)} chars total]" if len(output_str) > 500 else output_str
+                    _tool_log.append(f"Result: {_display}")
+                    _stream(f"\n🔧 {tc['name']}: {tc['arguments']}\n")
                     _stream(f"Result: {_display}\n")
                 # Prune old tool messages to bound context.
                 if len(messages) > 20:
@@ -1110,6 +1113,11 @@ class H(http.server.BaseHTTPRequestHandler):
         else:
             log.info("no usage block returned (model=%s, %.2fs)",
                      upstream_model, time.time() - t_start)
+
+        # Preserve tool commands in chat: TUI clears screen on response,
+        # so append execution log to final text.
+        if _tool_log and not any(t in final_text for t in _tool_log):
+            final_text = final_text.rstrip() + "\n\n" + "\n".join(_tool_log) + "\n"
 
         # Stream model response via already-open SSE
         try:
