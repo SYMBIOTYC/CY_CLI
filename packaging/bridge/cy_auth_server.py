@@ -9,7 +9,7 @@ import http.server
 import json
 import os
 import sys
-import webbrowser
+import subprocess
 import threading
 import time
 
@@ -71,7 +71,7 @@ class AuthHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(html.encode())
 
                 # Signal success
-                print(f"\n✓ API ключ получен и сохранён в {AUTH_FILE}")
+                print(f"\n[OK] API ключ получен и сохранён в {AUTH_FILE}")
                 print(f"  Email: {email or 'n/a'}")
                 print(f"  Ключ: {api_key[:12]}...{api_key[-4:]}")
 
@@ -114,8 +114,7 @@ def main():
     # Open browser
     auth_url = f"{AUTH_URL}/auth/google?callback=http://127.0.0.1:{PORT}/callback"
     try:
-        if not webbrowser.open(auth_url):
-            raise RuntimeError("webbrowser.open returned false")
+        subprocess.Popen(["open", auth_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         print(f"Не удалось открыть браузер. Перейдите вручную:")
         print(f"  {auth_url}")

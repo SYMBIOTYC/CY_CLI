@@ -1057,10 +1057,10 @@ class H(http.server.BaseHTTPRequestHandler):
                         "tool_call_id": tc["id"],
                         "content": output_str,
                     })
-                    _tool_log.append(f"\n🔧 {tc['name']}: {tc['arguments']}")
+                    _tool_log.append(f"\n[T] {tc['name']}: {tc['arguments']}")
                     _display = output_str[:500] + f"... [{len(output_str)} chars total]" if len(output_str) > 500 else output_str
                     _tool_log.append(f"Result: {_display}")
-                    _stream(f"\n🔧 {tc['name']}: {tc['arguments']}\n")
+                    _stream(f"\n[T] {tc['name']}: {tc['arguments']}\n")
                     _stream(f"Result: {_display}\n")
                 # Prune old tool messages to bound context.
                 if len(messages) > 20:
