@@ -228,7 +228,7 @@ jobs:
             <key>CFBundleDisplayName</key>
             <string>CY CLI</string>
             <key>CFBundleVersion</key>
-            <string>0.3.8</string>
+            <string>0.3.9</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleSignature</key>
